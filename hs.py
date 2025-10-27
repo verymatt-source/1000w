@@ -9,7 +9,7 @@ from operator import itemgetter # 【新增】：用于列表排序
 # --- 配置 ---
 OUTPUT_FILE = "index_price.html"
 REFRESH_INTERVAL = 1800  # 自动刷新时间（秒）。30分钟 = 30 * 60 = 1800秒
-MAX_CB_PRICE = 500.00 # 【新增配置】：可转债计算平均价时，剔除价格 >= 500.00 的标的
+MAX_CB_PRICE = 1000.00 # 【新增配置】：可转债计算平均价时，剔除价格 >= 500.00 的标的
 
 # ======================= 模块化配置 1：新浪 API 数据源 (指数/外汇) =======================
 # 定义需要采集的证券列表和自定义的目标价位。键是新浪API的股票代码格式。
@@ -409,3 +409,4 @@ if __name__ == "__main__":
         print(f"成功更新文件: {OUTPUT_FILE}，包含 {len(all_stock_data)} 个证券/指数数据。")
     except Exception as e:
         print(f"写入文件失败: {e}")
+
