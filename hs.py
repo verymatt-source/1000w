@@ -8,7 +8,7 @@ from operator import itemgetter # 用于列表排序
 
 # --- 全局配置 ---
 OUTPUT_FILE = "index_price.html"
-REFRESH_INTERVAL = 1800  # 自动刷新时间（秒）。30分钟 = 30 * 60 = 1800秒
+REFRESH_INTERVAL = 1800  # 网页自动刷新时间（秒）。30分钟 = 30 * 60 = 1800秒
 MAX_CB_PRICE = 9999.00 # 可转债计算平均价时可设置剔除价格，暂时不考虑剔除，因集思录、ninwin都没有剔除畸高数据
 
 # ======================= 通知配置区域 (新增) =======================
@@ -31,9 +31,9 @@ TARGET_PRICES = {
 # 2. 【新增】集中配置所有标的的【备注】
 # 键必须与 TARGET_STOCKS 或 CALCULATED_TARGETS 中 config['code'] 的值保持一致。
 TARGET_NOTES = {
-    "399975": "中证证券公司指数，低估买入，高估卖出。",
-    "USD/CNY": "长期观察汇率，支撑位和压力位需另行关注。",
-    "CB/AVG": "核心仓位指标，反映可转债整体估值水平。"
+    "399975": "/暂无",
+    "USD/CNY": "/暂无",
+    "CB/AVG": "/暂无"
 }
 
 
@@ -548,7 +548,6 @@ if __name__ == "__main__":
         print(f"成功更新文件: {OUTPUT_FILE}，包含 {len(all_stock_data)} 个证券/指数数据。")
     except Exception as e:
         print(f"写入文件失败: {e}")
-
 
 
 
