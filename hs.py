@@ -9,7 +9,7 @@ from operator import itemgetter # 用于列表排序
 # --- 全局配置 ---
 OUTPUT_FILE = "index_price.html"
 REFRESH_INTERVAL = 1800  # 自动刷新时间（秒）。30分钟 = 30 * 60 = 1800秒
-MAX_CB_PRICE = 500.00 # 可转债计算平均价时，剔除价格 >= 500.00 的标的
+MAX_CB_PRICE = 1000.00 # 可转债计算平均价时，剔除价格 >= 500.00 的标的
 
 # ======================= 集中配置区域 (新增/修改) =======================
 
@@ -17,8 +17,8 @@ MAX_CB_PRICE = 500.00 # 可转债计算平均价时，剔除价格 >= 500.00 的
 # 键必须与 TARGET_STOCKS 或 CALCULATED_TARGETS 中 config['code'] 的值保持一致。
 TARGET_PRICES = {
     "399975": 700.00,  # 证券公司指数
-    "USD/CNY": 7.0000, # 美元兑人民币
-    "CB/AVG": 130.00   # 可转债平均价格
+    "USD/CNY": 6.8000, # 美元兑人民币
+    "CB/AVG": 115.00   # 可转债平均价格
 }
 
 # 2. 【新增】集中配置所有标的的【备注】
