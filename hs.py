@@ -445,8 +445,8 @@ def create_html_content(stock_data_list):
 
     <div class="timestamp">数据更新时间: {timestamp_with_status}</div>
     <div class="note">
-        <p>📌 **代码运行时间说明**：本代码由 GitHub Actions 在**交易日**的**北京时间 09:05 至 16:00** 之间运行。</p>
-        <p>📌 **可转债计算说明**：可转债平均价格的计算已**剔除**价格大于或等于 {MAX_CB_PRICE:.2f} 的标的，以排除畸高价格的影响。（暂停该功能）</p>
+        <p>📌 **代码运行时间说明**：本代码由 GitHub Actions 在**交易日**的**运行。</p>
+        <p>📌 **可转债均价计算说明**：均价计算已**剔除**价格大于或等于 {MAX_CB_PRICE:.2f} 的标的。（相当于暂停该功能）</p>
         <p>注意：本页面每 {REFRESH_INTERVAL // 60} 分钟自动重新加载，以获取最新数据。</p>
     </div>
 </body>
@@ -593,3 +593,4 @@ if __name__ == "__main__":
         print(f"成功更新文件: {OUTPUT_FILE}，包含 {len(all_stock_data)} 个证券/指数数据。")
     except Exception as e:
         print(f"写入文件失败: {e}")
+
