@@ -151,7 +151,7 @@ def get_cb_codes_from_eastmoney():
         'Referer': 'https://data.eastmoney.com/kzz/default.html'
     }
     try:
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=headers, timeout=30)
         if response.status_code != 200:
             return [], f"HTTP错误：状态码 {response.status_code}"
         data = response.json()
@@ -485,3 +485,4 @@ if __name__ == "__main__":
         print(f"成功更新文件: {OUTPUT_FILE}，包含 {len(all_stock_data)} 个证券/指数数据。")
     except Exception as e:
         print(f"写入文件失败: {e}")
+
