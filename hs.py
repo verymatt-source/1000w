@@ -4,37 +4,56 @@ import time
 import json # 用于解析东方财富API返回的JSON数据
 import re # 用于解析新浪批量API返回的字符串数据
 from datetime import datetime
-from operator import itemgetter # 【新增】：用于列表排序
+from operator import itemgetter # 用于列表排序
 
-# --- 配置 ---
+# --- 全局配置 ---
 OUTPUT_FILE = "index_price.html"
 REFRESH_INTERVAL = 1800  # 自动刷新时间（秒）。30分钟 = 30 * 60 = 1800秒
-MAX_CB_PRICE = 1000.00 # 【新增配置】：可转债计算平均价时，剔除价格 >= 500.00 的标的
+MAX_CB_PRICE = 500.00 # 可转债计算平均价时，剔除价格 >= 500.00 的标的
 
-# ======================= 模块化配置 1：新浪 API 数据源 (指数/外汇) =======================
-# 定义需要采集的证券列表和自定义的目标价位。键是新浪API的股票代码格式。
+# ======================= 集中配置区域 (新增/修改) =======================
+
+# 1. 【新增】集中配置所有标的的【目标价位】
+# 键必须与 TARGET_STOCKS 或 CALCULATED_TARGETS 中 config['code'] 的值保持一致。
+TARGET_PRICES = {
+    "399975": 700.00,  # 证券公司指数
+    "USD/CNY": 7.0000, # 美元兑人民币
+    "CB/AVG": 130.00   # 可转债平均价格
+}
+
+# 2. 【新增】集中配置所有标的的【备注】
+# 键必须与 TARGET_STOCKS 或 CALCULATED_TARGETS 中 config['code'] 的值保持一致。
+TARGET_NOTES = {
+    "399975": "中证证券公司指数，低估买入，高估卖出。",
+    "USD/CNY": "长期观察汇率，支撑位和压力位需另行关注。",
+    "CB/AVG": "核心仓位指标，反映可转债整体估值水平。"
+}
+
+
+# ======================= 模块化配置 1：新浪 API 数据源 (指数/外汇) (修改) =======================
+# 定义需要采集的证券列表。目标价位已移至 TARGET_PRICES。
 TARGET_STOCKS = {
     
     "sz399975": {
         "name": "证券公司指数",
-        "code": "399975",
-        "target_price": 700.00  # 您的预设目标价
+        "code": "399975", 
+        # "target_price": 700.00 # 已移除，改为引用 TARGET_PRICES
     }, 
     
     # 美元汇率：
     "fx_susdcny": {
         "name": "美元兑人民币",
         "code": "USD/CNY",
-        "target_price": 7.0000  # 您的预设目标价（例如 7.00）
+        # "target_price": 7.0000 # 已移除，改为引用 TARGET_PRICES
     }
 }
 
-# ======================= 模块化配置 2：计算目标配置 (可转债) =======================
+# ======================= 模块化配置 2：计算目标配置 (可转债) (修改) =======================
 CALCULATED_TARGETS = {
     "cb_avg_price": {
         "name": "可转债平均价格", 
-        "code": "CB/AVG", # 虚拟代码，用于显示
-        "target_price": 120.00 # 您的预设目标价
+        "code": "CB/AVG", # 虚拟代码，用于显示和在 TARGET_PRICES 中查找配置
+        # "target_price": 130.00 # 已移除，改为引用 TARGET_PRICES
     }
 }
 
@@ -43,7 +62,6 @@ CALCULATED_TARGETS = {
 def get_data_sina(stock_api_code):
     """
     使用新浪财经API获取指定证券的实时价格，并返回一个包含多项数据的字典。
-    (此函数沿用原有逻辑，略作通用化修改)
     """
     url = f"http://hq.sinajs.cn/list={stock_api_code}"
     headers = {
@@ -56,11 +74,9 @@ def get_data_sina(stock_api_code):
         response.encoding = 'gbk'
         data = response.text
         
-        # 检查响应状态和数据格式
         if response.status_code != 200 or '="' not in data:
             return {"error": "获取失败", "detail": f"HTTP状态码: {response.status_code}"}
 
-        # 新浪数据格式：v_sz399975="指数名称,今开,昨收,当前价,最高,最低..."
         data_content = data.split('="')[1].strip('";')
         parts = data_content.split(',')
         
@@ -69,12 +85,11 @@ def get_data_sina(stock_api_code):
             
         current_price = parts[3]
         
-        # 验证价格数据的有效性
         if current_price and current_price.replace('.', '', 1).isdigit():
             return {
                 "current_price": float(current_price),
-                "open_price": float(parts[1]),  # 今开
-                "prev_close": float(parts[2]),  # 昨收
+                "open_price": float(parts[1]),
+                "prev_close": float(parts[2]),
             }
         else:
             return {"error": "解析失败", "detail": "价格数据无效"}
@@ -93,7 +108,6 @@ def get_cb_codes_from_eastmoney():
     url = "https://datacenter-web.eastmoney.com/api/data/v1/get?sortColumns=SECURITY_CODE&sortTypes=-1&pageSize=1000&pageNumber=1&reportName=RPT_BOND_CB_LIST&columns=SECURITY_CODE"
     
     headers = {
-        # 模拟浏览器访问的 Headers
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Referer': 'https://data.eastmoney.com/kzz/default.html'
     }
@@ -133,11 +147,11 @@ def get_cb_codes_from_eastmoney():
         return [], f"未知错误：{str(e)}"
 
 
-# ==================== 采集函数 2.2：计算平均价格 (新浪批量查询，包含剔除逻辑) ====================
+# ==================== 采集函数 2.2：计算平均价格 (包含剔除逻辑) ====================
 def get_cb_avg_price_from_list(codes_list):
     """
     通过新浪 API 批量获取指定可转债列表的价格，并计算有效价格的平均值。
-    【新增】：剔除价格 >= MAX_CB_PRICE 的标的。
+    剔除价格 >= MAX_CB_PRICE 的标的。
     """
     if not codes_list:
         return {"error": "计算失败", "detail": "可转债代码列表为空，无法进行计算。"}
@@ -158,7 +172,6 @@ def get_cb_avg_price_from_list(codes_list):
         if response.status_code != 200 or not data.strip():
             return {"error": "获取失败", "detail": f"新浪API状态码: {response.status_code}"}
         
-        # 1. 解析所有可转债数据
         valid_lines = [line for line in data.split('\n') if line.startswith('var hq_str_')]
         
         prices = []
@@ -174,14 +187,13 @@ def get_cb_avg_price_from_list(codes_list):
                     if price_str and price_str.replace('.', '', 1).isdigit():
                         price_float = float(price_str)
                         
-                        # 【剔除逻辑】：只纳入价格大于0且低于 MAX_CB_PRICE 的标的进行计算
+                        # 剔除逻辑：只纳入价格大于0且低于 MAX_CB_PRICE 的标的进行计算
                         if price_float > 0 and price_float < MAX_CB_PRICE:
                             prices.append(price_float)
         
         if not prices:
             return {"error": "计算失败", "detail": f"已获取 {len(codes_list)} 个代码，但新浪未返回有效或低于 {MAX_CB_PRICE:.2f} 的价格数据。"}
 
-        # 2. 计算平均价格
         avg_price = sum(prices) / len(prices)
         
         return {
@@ -201,16 +213,15 @@ def get_cb_avg_price_from_list(codes_list):
 def create_html_content(stock_data_list):
     """
     生成带有价格表格、目标比例和自动刷新功能的HTML内容。
-    【修改】：增加 '目标比例' 列，更新备注信息。
+    【修改】：增加 '备注' 列。
     """
-    # 备注信息中需要用到 MAX_CB_PRICE，直接使用全局常量
     global MAX_CB_PRICE
     global REFRESH_INTERVAL
     
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S (北京时间)')
     table_rows = []
     
-    # 【修改】：增加 '目标比例' 这一列，并调整列顺序
+    # 【修改】：增加 '备注' 这一列
     table_rows.append("""
         <tr>
             <th>标的名称</th>
@@ -218,16 +229,18 @@ def create_html_content(stock_data_list):
             <th>目标价位</th>
             <th>当前价位</th>
             <th>目标比例</th> 
+            <th>备注</th>
         </tr>
     """)
     
     for data in stock_data_list:
         
-        price_color = '#27ae60'  # 默认绿色
-        ratio_color = '#7f8c8d' # 默认比例颜色
+        price_color = '#27ae60' 
+        ratio_color = '#7f8c8d'
         target_display = f"{data['target_price']:.2f}"
         price_display = "N/A"
         ratio_display = "N/A"
+        note_display = data.get('note', '') # 获取备注信息
         
         if data['is_error']:
             # 错误信息显示为红色
@@ -236,9 +249,9 @@ def create_html_content(stock_data_list):
         else:
             # 1. 价格格式化
             if data['code'] == 'USD/CNY':
-                price_display = f"{data['current_price']:.4f}" # 汇率保留四位
+                price_display = f"{data['current_price']:.4f}"
             elif data['code'] == 'CB/AVG':
-                price_display = f"{data['current_price']:.3f}" # 平均价保留三位
+                price_display = f"{data['current_price']:.3f}"
             else:
                 price_display = f"{data['current_price']:.3f}"
                 
@@ -269,6 +282,7 @@ def create_html_content(stock_data_list):
             <td>{target_display}</td>
             <td style="color: {price_color}; font-weight: bold;">{price_display}</td>
             <td style="color: {ratio_color}; font-weight: bold;">{ratio_display}</td>
+            <td style="text-align: left;">{note_display}</td>
         </tr>
         """
         table_rows.append(row)
@@ -276,7 +290,6 @@ def create_html_content(stock_data_list):
     table_content = "".join(table_rows)
 
     # --- 2. 完整的 HTML 模板 ---
-    # 【新增】：在 .note 区域添加运行说明和剔除说明
     html_template = f"""
 <!DOCTYPE html>
 <html lang="zh">
@@ -288,7 +301,7 @@ def create_html_content(stock_data_list):
         body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; margin-top: 50px; background-color: #f4f4f9; }}
         h1 {{ color: #2c3e50; font-size: 2.5em; }}
         table {{ 
-            width: 80%; 
+            width: 95%; /* 增加表格宽度以容纳备注 */
             margin: 30px auto; 
             border-collapse: collapse; 
             box-shadow: 0 4px 8px rgba(0,0,0,0.1);
@@ -298,7 +311,10 @@ def create_html_content(stock_data_list):
             border: 1px solid #ddd; 
             padding: 15px; 
             text-align: center;
-            font-size: 1.1em;
+            font-size: 1.0em;
+        }}
+        th:last-child, td:last-child {{
+            text-align: left; /* 备注列左对齐 */
         }}
         th {{ 
             background-color: #3498db; 
@@ -334,56 +350,61 @@ if __name__ == "__main__":
     all_stock_data = []
     
     # ================= 运行模块 1：新浪 API (指数/外汇) =================
-    # 遍历固定的证券和外汇配置，收集初始数据
     for api_code, config in TARGET_STOCKS.items():
         api_data = get_data_sina(api_code)
+        
+        # 【新增】：从集中配置中获取目标价和备注
+        target_code = config["code"]
+        target_price = TARGET_PRICES.get(target_code, 0.0) # 如果找不到，默认为 0.0
+        target_note = TARGET_NOTES.get(target_code, "") # 如果找不到，默认为空字符串
+        
         final_data = {
             "name": config["name"],
-            "code": config["code"],
-            "target_price": config["target_price"],
+            "code": target_code,
+            "target_price": target_price, # 引用集中配置的目标价
+            "note": target_note,         # 引用集中配置的备注
             "is_error": "error" in api_data,
-            "current_price": api_data.get("current_price"), # 确保 current_price 字段存在
+            "current_price": api_data.get("current_price"),
             **api_data
         }
         all_stock_data.append(final_data)
         
     # ================= 运行模块 2：可转债平均价格计算 (动态列表) =================
-    
-    # Step 2.1: 动态获取最新的可转债代码列表 (东方财富网)
     codes_list, error_msg = get_cb_codes_from_eastmoney()
     
-    # Step 2.2: 根据列表结果，决定是报错还是计算平均价格
     config = CALCULATED_TARGETS['cb_avg_price']
+    target_code = config["code"] # "CB/AVG"
     
     if error_msg:
-        # 如果获取代码列表失败，直接记录错误
         api_data = {"error": "代码列表获取失败", "detail": error_msg}
     else:
-        # 如果代码列表获取成功，调用新浪 API 批量计算平均价格
         api_data = get_cb_avg_price_from_list(codes_list)
+    
+    # 【新增】：从集中配置中获取目标价和备注
+    target_price = TARGET_PRICES.get(target_code, 0.0)
+    target_note = TARGET_NOTES.get(target_code, "")
     
     final_data = {
         "name": config["name"],
-        "code": config["code"],
-        "target_price": config["target_price"],
+        "code": target_code,
+        "target_price": target_price, # 引用集中配置的目标价
+        "note": target_note,         # 引用集中配置的备注
         "is_error": "error" in api_data,
-        "current_price": api_data.get("current_price"), # 确保 current_price 字段存在
+        "current_price": api_data.get("current_price"),
         **api_data
     }
     
-    # 动态更新名称，以显示当前计算了多少个可转债 (增强信息展示)
     if 'count' in api_data and not final_data['is_error']:
         final_data['name'] = f"可转债平均价格 (基于{api_data['count']}个代码计算)"
     else:
-        final_data['name'] = config['name'] # 保持默认名称
+        final_data['name'] = config['name'] 
         
     all_stock_data.append(final_data)
         
-    # ================= 运行模块 3：计算目标比例并排序 (新增模块) =================
+    # ================= 运行模块 3：计算目标比例并排序 =================
     
     # 1. 计算目标比例 (Target Ratio): (当前价位 - 目标价位) / 当前价位
     for item in all_stock_data:
-        # 初始化比例为 None，用于错误或无效数据
         item['target_ratio'] = None 
         
         if not item['is_error'] and item['current_price'] is not None and item['current_price'] != 0:
@@ -394,8 +415,6 @@ if __name__ == "__main__":
             item['target_ratio'] = (current_price - target_price) / current_price
         
     # 2. 按目标比例升序排序 (从低到高)
-    # 排序键：使用 lambda 表达式。如果 target_ratio 为 None (数据错误/缺失)，
-    # 则返回 float('inf')，确保这些数据排在列表的最后。
     all_stock_data.sort(key=lambda x: x['target_ratio'] if x['target_ratio'] is not None else float('inf'))
 
 
@@ -409,4 +428,3 @@ if __name__ == "__main__":
         print(f"成功更新文件: {OUTPUT_FILE}，包含 {len(all_stock_data)} 个证券/指数数据。")
     except Exception as e:
         print(f"写入文件失败: {e}")
-
