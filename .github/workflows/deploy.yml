@@ -44,7 +44,7 @@ jobs:
     # 设置环境变量 (Environment Variable)
     env:
       TZ: 'Asia/Shanghai' 
-      # 【新增/修正】将 GitHub Secrets 中的 Server酱 SendKey 注入为环境变量
+      # 【✅ 关键修正：添加此行，注入 Server酱 Secret Key ✅】
       # 变量名 SERVERCHAN_SCKEY 必须与 hs.py 中读取的变量名完全一致。
       SERVERCHAN_SCKEY: ${{ secrets.SERVERCHAN_SCKEY }} 
     
