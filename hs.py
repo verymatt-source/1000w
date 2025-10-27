@@ -27,6 +27,15 @@ NOTIFICATION_LOG_FILE = "notification_log.json"  # 记录已发送通知历史�
 # note: 标的备注说明
 
 ALL_TARGET_CONFIGS = {
+    # 【新增】上证指数 (内部代码 SSEC)
+    "SSEC": {
+        "name": "上证指数",
+        "type": "SINA",
+        "api_code": "sh000001",  # 新浪 API 的上证指数代码
+        "target_price": 3000.00, # 【注意】请根据需要修改您的目标价位
+        "note": "/暂无"
+    },
+    
     # 证券公司指数
     "399975": {
         "name": "证券公司指数",
@@ -485,4 +494,5 @@ if __name__ == "__main__":
         print(f"成功更新文件: {OUTPUT_FILE}，包含 {len(all_stock_data)} 个证券/指数数据。")
     except Exception as e:
         print(f"写入文件失败: {e}")
+
 
