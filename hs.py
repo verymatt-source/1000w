@@ -296,7 +296,8 @@ def create_html_content(stock_data_list):
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="refresh" content="{REFRESH_INTERVAL}">
-    <title>证券指数实时监控</title>
+    <title>数据展示</title>
+    <meta name="robots" content="noindex, nofollow">
     <style>
         body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; margin-top: 50px; background-color: #f4f4f9; }}
         h1 {{ color: #2c3e50; font-size: 2.5em; }}
@@ -327,7 +328,7 @@ def create_html_content(stock_data_list):
     </style>
 </head>
 <body>
-    <h1>证券指数实时监控 (按目标比例排序)</h1>
+    <h1>数据展示 (按目标比例排序)</h1>
     
     <table>
         {table_content}
