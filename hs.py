@@ -13,7 +13,7 @@ MAX_CB_PRICE = 9999.00 # 可转债计算平均价时可设置剔除价格，暂�
 
 # ======================= 通知配置区域 (新增) =======================
 # 用于判断是否达到目标价位的浮点数容忍度。abs(目标比例) <= NOTIFICATION_TOLERANCE 视为触发
-NOTIFICATION_TOLERANCE = 0.0001 
+NOTIFICATION_TOLERANCE = 0.0005 
 # 记录已发送通知的日志文件，用于实现每日只发送一次
 NOTIFICATION_LOG_FILE = "notification_log.json" 
 # =================================================================
@@ -23,7 +23,7 @@ NOTIFICATION_LOG_FILE = "notification_log.json"
 # 1. 【新增】集中配置所有标的的【目标价位】
 # 键必须与 TARGET_STOCKS 或 CALCULATED_TARGETS 中 config['code'] 的值保持一致。
 TARGET_PRICES = {
-    "399975": 895.80,  # 证券公司指数
+    "399975": 700.00,  # 证券公司指数
     "USD/CNY": 6.8000, # 美元兑人民币
     "CB/AVG": 115.00   # 可转债平均价格
 }
@@ -548,6 +548,7 @@ if __name__ == "__main__":
         print(f"成功更新文件: {OUTPUT_FILE}，包含 {len(all_stock_data)} 个证券/指数数据。")
     except Exception as e:
         print(f"写入文件失败: {e}")
+
 
 
 
