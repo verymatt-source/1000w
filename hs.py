@@ -5,6 +5,7 @@ import json # 用于解析东方财富API返回的JSON数据 / 【新增】用�
 import re # 用于解析新浪批量API返回的字符串数据
 from datetime import datetime
 from operator import itemgetter # 用于列表排序
+import calendar # 【新增】用于判断周末/交易日
 
 # --- 全局配置 ---
 OUTPUT_FILE = "index_price.html"
@@ -272,18 +273,61 @@ def get_cb_avg_price_from_list(codes_list):
         return {"error": "未知错误", "detail": f"数据处理异常: {str(e)}"}
 
 
+# ==================== 辅助函数 (新增) ====================
+def is_trading_time():
+    """
+    判断当前时间是否处于中国证券市场的正常交易时段 (北京时间)。
+    不考虑法定节假日，只判断周一至周五 9:30-11:30 和 13:00-15:00。
+    """
+    now = datetime.now()
+    hour = now.hour
+    minute = now.minute
+    weekday = now.weekday() # Monday is 0 and Sunday is 6
+    
+    # 1. 判断是否为工作日 (周一到周五)
+    if weekday >= 5: # 5: Saturday, 6: Sunday
+        return False
+        
+    # 2. 判断是否处于交易时段
+    
+    # 上午: 9:30 - 11:30
+    am_start = 9 * 60 + 30
+    am_end = 11 * 60 + 30
+    
+    # 下午: 13:00 - 15:00
+    pm_start = 13 * 60 + 0
+    pm_end = 15 * 60 + 0
+    
+    current_minutes = hour * 60 + minute
+    
+    if (current_minutes >= am_start and current_minutes <= am_end) or \
+       (current_minutes >= pm_start and current_minutes <= pm_end):
+        return True
+        
+    return False
+
 # ==================== HTML 生成函数 (包含目标比例列和备注) ====================
-# (此函数来自您提供的正常运行的 hs.py 文件，保持不变)
+# (此函数来自您提供的正常运行的 hs.py 文件，已根据要求修改)
 def create_html_content(stock_data_list):
     """
     生成带有价格表格、目标比例和自动刷新功能的HTML内容。
     【修改】：增加 '备注' 列。
+    【新增】：根据交易时间判断状态，并添加到时间戳后面。
     """
     global MAX_CB_PRICE
     global REFRESH_INTERVAL
     
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S (北京时间)')
     table_rows = []
+    
+    # 【新增】判断交易时间状态
+    if is_trading_time():
+        status_text = '<span style="color: #27ae60;">正常运行</span>' # 绿色
+    else:
+        status_text = '非交易时间' # 保持默认颜色（灰色）
+        
+    # 【新增】将状态文本添加到时间戳后面
+    timestamp_with_status = f"{timestamp} | {status_text}"
     
     # 【修改】：增加 '备注' 这一列
     table_rows.append("""
@@ -354,6 +398,7 @@ def create_html_content(stock_data_list):
     table_content = "".join(table_rows)
 
     # --- 2. 完整的 HTML 模板 ---
+    # 【修改】：在 .timestamp div 中使用新的 timestamp_with_status 变量
     html_template = f"""
 <!DOCTYPE html>
 <html lang="zh">
@@ -398,7 +443,7 @@ def create_html_content(stock_data_list):
         {table_content}
     </table>
 
-    <div class="timestamp">数据更新时间: {timestamp}</div>
+    <div class="timestamp">数据更新时间: {timestamp_with_status}</div>
     <div class="note">
         <p>📌 **代码运行时间说明**：本代码由 GitHub Actions 在**交易日**的**北京时间 09:05 至 16:00** 之间运行。</p>
         <p>📌 **可转债计算说明**：可转债平均价格的计算已**剔除**价格大于或等于 {MAX_CB_PRICE:.2f} 的标的，以排除畸高价格的影响。（暂停该功能）</p>
@@ -548,4 +593,3 @@ if __name__ == "__main__":
         print(f"成功更新文件: {OUTPUT_FILE}，包含 {len(all_stock_data)} 个证券/指数数据。")
     except Exception as e:
         print(f"写入文件失败: {e}")
-
