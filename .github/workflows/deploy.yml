@@ -1,21 +1,15 @@
 # .github/workflows/deploy.yml
 name: Scheduled Price Update and Deploy
 
-# 1. 配置触发器
 on:
-  # 定时触发：在每小时的 0 分和 30 分运行，即每隔 30 分钟。
   schedule:
     - cron: '0,30 * * * *' 
-  
-  # 允许手动触发，方便调试
   workflow_dispatch:
 
-# 限制并发运行，避免重复任务
 concurrency:
   cancel-in-progress: true
   group: ${{ github.workflow }}-${{ github.ref }}
 
-# 授予 GITHUB_TOKEN 写入权限以部署 Pages
 permissions:
   contents: read
   pages: write
@@ -25,30 +19,29 @@ jobs:
   run_and_build:
     runs-on: ubuntu-latest
     steps:
-      # 1. 检出代码
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. 设置 Python 环境
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11' 
+          python-version: '3.11'
 
-      # 3. 安装依赖 (requests)
       - name: Install dependencies
         run: pip install requests
         
-      # 4. 运行 Python 脚本
-      # 使用 python -u 来确保输出被及时刷新到日志
-      - name: Run price scraper
-        run: python -u hs.py
-
-      # 4.1 🛠 调试步骤：检查文件是否生成 
-      - name: Verify file creation
-        run: ls -al
+      # 4. 运行 Python 脚本，创建 _site 目录并移动文件
+      - name: Run price scraper and build site
+        run: |
+          mkdir _site
+          python -u hs.py
+          # 将生成的 index_price.html 移动到 _site 目录，并重命名为 index.html (Pages标准入口)
+          mv index_price.html _site/index.html 
+          
+      # 4.1 🛠 调试步骤：检查 _site 目录内容
+      - name: Verify site creation
+        run: ls -al _site
         
-      # 5. 配置 Pages 部署环境
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
@@ -56,9 +49,8 @@ jobs:
       - name: Upload artifact for deployment
         uses: actions/upload-pages-artifact@v3
         with:
-          path: 'index_price.html' 
+          path: '_site' # 上传整个 _site 目录
 
-      # 7. 部署到 GitHub Pages
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
