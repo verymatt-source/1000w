@@ -16,6 +16,12 @@ TARGET_STOCKS = {
         "code": "399975",
         "target_price": 700.00  # 您的预设目标价
     }
+    # 美元汇率：
+    "fx_susdcny": {
+        "name": "美元兑人民币",
+        "code": "USD/CNY",
+        "target_price": 7.0000  # 您的预设目标价（例如 7.00）
+    }
     # 示例：如果您要增加沪深300指数：
     # "sh000300": {
     #     "name": "沪深300指数",
@@ -207,4 +213,3 @@ if __name__ == "__main__":
         print(f"成功更新文件: {OUTPUT_FILE}，包含 {len(all_stock_data)} 个证券数据。")
     except Exception as e:
         print(f"写入文件失败: {e}")
-
