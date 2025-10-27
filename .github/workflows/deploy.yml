@@ -14,40 +14,40 @@ on:
     - cron: '5,35 1-7 * * 1-5'
   
   # 手动触发器 (Manual Trigger)
-  # 允许您在 Actions 页面点击按钮来手动运行此工作流。
   workflow_dispatch:
 
 # ------------------------------------------------------------
 # 3. 并发控制 (Concurrency)
 # ------------------------------------------------------------
 concurrency:
-  # 确保如果工作流已经在运行，新的触发不会启动，而是取消正在运行的那个。
   cancel-in-progress: true
   group: ${{ github.workflow }}-${{ github.ref }}
 
 # ------------------------------------------------------------
 # 4. 权限配置 (Permissions)
+# 【关键】部署到 GitHub Pages 必须授予这些权限
+# contents: write 用于将更新后的 notification_log.json 提交回 Pages 分支。
+# pages 和 id-token 用于 Pages 部署认证。
 # ------------------------------------------------------------
-# **【关键】** 部署到 GitHub Pages 必须授予这些权限
 permissions:
-  contents: read     # 读取仓库代码是必须的
-  pages: write       # 部署到 Pages 必须的权限
-  id-token: write    # 用于 Pages 身份验证
+  contents: write     
+  pages: write       
+  id-token: write    
 
 # ------------------------------------------------------------
-# 5. 任务 (Jobs) 定义
+# 5. 任务 (Jobs) 配置
 # ------------------------------------------------------------
 jobs:
   run_and_build:
     runs-on: ubuntu-latest
     
-    # 【北京时间修正】设置环境变量 (Environment Variable)
-    # 强制整个运行环境的时区设置为北京时间 (Asia/Shanghai)，
-    # 这样 hs.py 中的 datetime.now() 就会直接返回正确的本地时间。
+    # 设置环境变量 (Environment Variable)
     env:
       TZ: 'Asia/Shanghai' 
+      # 【新增/修正】将 GitHub Secrets 中的 Server酱 SendKey 注入为环境变量
+      # 变量名 SERVERCHAN_SCKEY 必须与 hs.py 中读取的变量名完全一致。
+      SERVERCHAN_SCKEY: ${{ secrets.SERVERCHAN_SCKEY }} 
     
-    # 定义任务的执行步骤
     steps:
       # 1. 检出代码 (Checkout)
       - name: 检出仓库代码
@@ -64,32 +64,47 @@ jobs:
         run: pip install requests
         
       # 4. 运行脚本并构建站点目录
-      # 【文件路径修正】创建 _site 目录并移动文件，这是 Pages 部署的标准做法。
       - name: 运行价格脚本并构建 _site 目录
         run: |
           # 1. 创建 Pages 标准的输出目录 _site
           mkdir _site
-          # 2. 运行 Python 脚本。-u 确保输出不被缓冲
+          # 2. 运行 Python 脚本。脚本运行时会读/写 notification_log.json
           python -u hs.py
-          # 3. 移动并重命名文件。将生成的 index_price.html 移动到 _site/index.html (Pages标准入口)
+          # 3. 移动并重命名文件。
           mv index_price.html _site/index.html 
+          # 4. 【关键】：将日志文件也移动到 _site 目录，以便 Actions 上传并持久化
+          if [ -f notification_log.json ]; then
+            mv notification_log.json _site/
+          fi
           
       # 5. 🛠 调试步骤：检查 _site 目录内容
-      # 这是一个检查步骤，确保文件已成功生成
-      - name: 验证站点文件是否创建成功
-        run: ls -al _site
+      - name: 检查 _site 目录内容
+        run: ls -R _site/
         
-      # 6. 配置 Pages 部署环境
+      # ------------------------------------------------------------
+      # 【部署修复】上传部署文件 (Artifacts)，解决 "No artifacts named..." 错误
+      # ------------------------------------------------------------
       - name: 配置 GitHub Pages 部署
         uses: actions/configure-pages@v5
 
-      # 7. 上传工件 (Artifact)
       - name: 上传待部署的文件 (Pages Artifact)
         uses: actions/upload-pages-artifact@v3
         with:
-          path: '_site' # 上传整个 _site 目录
+          path: '_site' # 上传 _site 目录下的所有内容
+          
+      # ------------------------------------------------------------
 
-      # 8. 部署到 GitHub Pages
-      - name: 部署到 GitHub Pages
+  # ------------------------------------------------------------
+  # 6. 部署到 GitHub Pages (Deployment)
+  # ------------------------------------------------------------
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    # 部署任务依赖于 run_and_build 任务
+    needs: run_and_build 
+    steps:
+      - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
