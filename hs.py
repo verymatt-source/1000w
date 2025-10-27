@@ -1,7 +1,7 @@
 import requests
 import os
 import time
-import json # 用于解析东方财富API返回的JSON数据
+import json # 用于解析东方财富API返回的JSON数据 / 【新增】用于日志文件操作
 import re # 用于解析新浪批量API返回的字符串数据
 from datetime import datetime
 from operator import itemgetter # 用于列表排序
@@ -11,12 +11,19 @@ OUTPUT_FILE = "index_price.html"
 REFRESH_INTERVAL = 1800  # 自动刷新时间（秒）。30分钟 = 30 * 60 = 1800秒
 MAX_CB_PRICE = 9999.00 # 可转债计算平均价时可设置剔除价格，暂时不考虑剔除，因集思录、ninwin都没有剔除畸高数据
 
+# ======================= 通知配置区域 (新增) =======================
+# 用于判断是否达到目标价位的浮点数容忍度。abs(目标比例) <= NOTIFICATION_TOLERANCE 视为触发
+NOTIFICATION_TOLERANCE = 0.0001 
+# 记录已发送通知的日志文件，用于实现每日只发送一次
+NOTIFICATION_LOG_FILE = "notification_log.json" 
+# =================================================================
+
 # ======================= 集中配置区域 (新增/修改) =======================
 
 # 1. 【新增】集中配置所有标的的【目标价位】
 # 键必须与 TARGET_STOCKS 或 CALCULATED_TARGETS 中 config['code'] 的值保持一致。
 TARGET_PRICES = {
-    "399975": 899.00,  # 证券公司指数
+    "399975": 700.00,  # 证券公司指数
     "USD/CNY": 6.8000, # 美元兑人民币
     "CB/AVG": 115.00   # 可转债平均价格
 }
@@ -57,8 +64,62 @@ CALCULATED_TARGETS = {
     }
 }
 
+# ==================== 日志操作和通知函数 (新增) ====================
+
+def load_notification_log():
+    """尝试加载通知日志文件。如果文件不存在或解析失败，返回空字典。"""
+    if os.path.exists(NOTIFICATION_LOG_FILE):
+        try:
+            with open(NOTIFICATION_LOG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (IOError, json.JSONDecodeError):
+            print("警告：无法读取或解析通知日志文件，将使用新日志。")
+            return {}
+    return {}
+
+def save_notification_log(log_data):
+    """保存通知日志文件，用于记录通知历史。"""
+    try:
+        with open(NOTIFICATION_LOG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(log_data, f, ensure_ascii=False, indent=4)
+        print(f"成功保存通知日志文件: {NOTIFICATION_LOG_FILE}")
+    except IOError as e:
+        print(f"错误：无法写入通知日志文件: {e}")
+
+
+def send_serverchan_notification(title, content):
+    """通过 Server酱 发送通知。"""
+    # 从 Actions 环境变量中读取 SendKey (依赖 deploy.yml 中设置 SERVERCHAN_SCKEY)
+    SCKEY = os.environ.get('SERVERCHAN_SCKEY')
+    
+    if not SCKEY:
+        print("警告：未找到 SERVERCHAN_SCKEY 环境变量，通知功能跳过。")
+        return False
+
+    url = f"https://sctapi.ftqq.com/{SCKEY}.send"
+    data = {"title": title, "desp": content}
+    
+    try:
+        response = requests.post(url, data=data, timeout=5)
+        response.raise_for_status() 
+        result = response.json()
+        
+        if result.get('code') == 0:
+            print("Server酱通知发送成功。")
+            return True
+        else:
+            print(f"Server酱通知发送失败：{result.get('message')}")
+            return False
+    except requests.exceptions.RequestException as e:
+        print(f"Server酱通知发送失败 (网络错误): {e}")
+        return False
+    except Exception as e:
+        print(f"Server酱通知发送失败 (未知错误): {e}")
+        return False
+
 
 # ==================== 采集函数 1：新浪 API (单个证券/外汇) ====================
+# (此函数来自您提供的正常运行的 hs.py 文件，保持不变)
 def get_data_sina(stock_api_code):
     """
     使用新浪财经API获取指定证券的实时价格，并返回一个包含多项数据的字典。
@@ -101,6 +162,7 @@ def get_data_sina(stock_api_code):
 
 
 # ==================== 采集函数 2.1：动态代码获取 (东方财富) ====================
+# (此函数来自您提供的正常运行的 hs.py 文件，保持不变)
 def get_cb_codes_from_eastmoney():
     """
     通过爬取东方财富网的公开接口，动态获取所有正在交易中的可转债代码列表。
@@ -148,6 +210,7 @@ def get_cb_codes_from_eastmoney():
 
 
 # ==================== 采集函数 2.2：计算平均价格 (包含剔除逻辑) ====================
+# (此函数来自您提供的正常运行的 hs.py 文件，保持不变)
 def get_cb_avg_price_from_list(codes_list):
     """
     通过新浪 API 批量获取指定可转债列表的价格，并计算有效价格的平均值。
@@ -210,6 +273,7 @@ def get_cb_avg_price_from_list(codes_list):
 
 
 # ==================== HTML 生成函数 (包含目标比例列和备注) ====================
+# (此函数来自您提供的正常运行的 hs.py 文件，保持不变)
 def create_html_content(stock_data_list):
     """
     生成带有价格表格、目标比例和自动刷新功能的HTML内容。
@@ -356,14 +420,14 @@ if __name__ == "__main__":
         
         # 【新增】：从集中配置中获取目标价和备注
         target_code = config["code"]
-        target_price = TARGET_PRICES.get(target_code, 0.0) # 如果找不到，默认为 0.0
-        target_note = TARGET_NOTES.get(target_code, "") # 如果找不到，默认为空字符串
+        target_price = TARGET_PRICES.get(target_code, 0.0) 
+        target_note = TARGET_NOTES.get(target_code, "") 
         
         final_data = {
             "name": config["name"],
             "code": target_code,
-            "target_price": target_price, # 引用集中配置的目标价
-            "note": target_note,         # 引用集中配置的备注
+            "target_price": target_price, 
+            "note": target_note,         
             "is_error": "error" in api_data,
             "current_price": api_data.get("current_price"),
             **api_data
@@ -371,25 +435,24 @@ if __name__ == "__main__":
         all_stock_data.append(final_data)
         
     # ================= 运行模块 2：可转债平均价格计算 (动态列表) =================
-    codes_list, error_msg = get_cb_codes_from_eastmoney()
+    codes_list, error_msg = get_cb_codes_from_eastmoney() # (使用您提供的“正常运行”的函数)
     
     config = CALCULATED_TARGETS['cb_avg_price']
-    target_code = config["code"] # "CB/AVG"
+    target_code = config["code"] 
     
     if error_msg:
         api_data = {"error": "代码列表获取失败", "detail": error_msg}
     else:
         api_data = get_cb_avg_price_from_list(codes_list)
     
-    # 【新增】：从集中配置中获取目标价和备注
     target_price = TARGET_PRICES.get(target_code, 0.0)
     target_note = TARGET_NOTES.get(target_code, "")
     
     final_data = {
         "name": config["name"],
         "code": target_code,
-        "target_price": target_price, # 引用集中配置的目标价
-        "note": target_note,         # 引用集中配置的备注
+        "target_price": target_price, 
+        "note": target_note,         
         "is_error": "error" in api_data,
         "current_price": api_data.get("current_price"),
         **api_data
@@ -419,6 +482,62 @@ if __name__ == "__main__":
     all_stock_data.sort(key=lambda x: x['target_ratio'] if x['target_ratio'] is not None else float('inf'))
 
 
+    # ================= 运行模块 4：目标价位通知 (新增) =================
+    
+    print("--- 正在检查目标价位通知 ---")
+    
+    today_date = datetime.now().strftime('%Y-%m-%d')
+    notification_log = load_notification_log() # 加载历史日志
+    log_updated = False # 标记日志文件是否需要保存
+
+    for item in all_stock_data:
+        code = item.get('code')
+        name = item.get('name')
+        ratio = item.get('target_ratio')
+        
+        # 仅对有效数据进行判断
+        if item['is_error'] or ratio is None:
+            continue
+            
+        # 触发条件：偏离目标比例在容忍度范围内 (即现价约等于目标价)
+        is_triggered = abs(ratio) <= NOTIFICATION_TOLERANCE
+        # 防重发判断：检查今天是否已经发送过
+        is_notified_today = notification_log.get(code) == today_date
+
+        if is_triggered and not is_notified_today:
+            
+            # 【您的要求】：新标题格式
+            title = f"【{name}】到达目标价位！！！" 
+            
+            # 【您的要求】：新内容格式 - 使用 Markdown 表格
+            content = (
+                f"### 🎯 价格监控提醒\n\n"
+                f"**标的名称：** {name}\n\n"
+                f"| 指标 | 数值 |\n"
+                f"| :--- | :--- |\n"
+                f"| **当前价位** | {item['current_price']:.4f} |\n"
+                f"| **目标价位** | {item['target_price']:.4f} |\n"
+                f"| **偏离比例** | {ratio * 100:.4f} % |\n\n"
+                f"--- \n\n"
+                f"**策略备注：** {item.get('note', '无')}\n\n"
+                f"--- \n\n"
+                f"本次通知已记录（{today_date}），当日不再重复发送。"
+            )
+            
+            send_success = send_serverchan_notification(title, content)
+            
+            # 记录通知日志
+            if send_success:
+                notification_log[code] = today_date
+                log_updated = True
+    
+    # 如果日志有更新（即成功发送了通知），则保存文件
+    if log_updated:
+        save_notification_log(notification_log)
+
+
+    # ================= 运行模块 5：生成 HTML 文件 =================
+    
     # 3. 生成 HTML 内容
     html_content = create_html_content(all_stock_data)
 
@@ -429,4 +548,3 @@ if __name__ == "__main__":
         print(f"成功更新文件: {OUTPUT_FILE}，包含 {len(all_stock_data)} 个证券/指数数据。")
     except Exception as e:
         print(f"写入文件失败: {e}")
-
