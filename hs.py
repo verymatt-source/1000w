@@ -4,12 +4,10 @@ import time
 from datetime import datetime
 
 # --- 配置 ---
-# 修正：将 OUTPUT_DIR 和 OUTPUT_FILE 简化为当前工作目录下的文件名
-# 在 GitHub Actions 中，直接使用文件名会在当前运行目录生成，这是我们需要的。
+# 修正：直接使用文件名，确保文件生成在 Actions 运行器的当前工作目录。
 OUTPUT_FILE = "index_price.html"
 
 # 自动刷新时间（秒）。30分钟 = 30 * 60 = 1800秒
-# 注意：在 PythonAnywhere 上你需要配置一个每隔 30 分钟运行一次的“定时任务”
 REFRESH_INTERVAL = 1800  
 
 # ==================== 价格获取函数 (沿用新浪API的健壮版本) ====================
@@ -82,8 +80,7 @@ def create_html_content(name, price):
 
 # --- 主逻辑 ---
 if __name__ == "__main__":
-    # 删除创建目录的逻辑，因为现在 OUTPUT_FILE 是纯文件名，不需要创建目录
-
+    
     # 尝试获取价格
     index_name, current_price = get_sz399975_price_sina()
 
@@ -94,11 +91,12 @@ if __name__ == "__main__":
         # 如果获取失败，写入错误提示
         error_message = f"数据获取失败！原因: {index_name}。详细: {current_price}"
         html_content = create_html_content("错误", error_message)
-
+        
     try:
-        # 使用新的 OUTPUT_FILE 变量写入当前工作目录
+        # 直接使用文件名写入，文件将生成在 Actions 运行的当前工作目录
         with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
             f.write(html_content)
         print(f"成功更新文件: {OUTPUT_FILE}，价格: {current_price}")
     except Exception as e:
+        # 这里的 print 信息将输出到 GitHub Actions 日志中
         print(f"写入文件失败: {e}")
