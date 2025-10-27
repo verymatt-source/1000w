@@ -9,7 +9,7 @@ from operator import itemgetter # 用于列表排序
 # --- 全局配置 ---
 OUTPUT_FILE = "index_price.html"
 REFRESH_INTERVAL = 1800  # 自动刷新时间（秒）。30分钟 = 30 * 60 = 1800秒
-MAX_CB_PRICE = 1000.00 # 可转债计算平均价时，剔除价格 >= 500.00 的标的
+MAX_CB_PRICE = 9999.00 # 可转债计算平均价时可设置剔除价格，暂时不考虑剔除，因集思录、ninwin都没有剔除畸高数据
 
 # ======================= 集中配置区域 (新增/修改) =======================
 
@@ -336,7 +336,7 @@ def create_html_content(stock_data_list):
     <div class="timestamp">数据更新时间: {timestamp}</div>
     <div class="note">
         <p>📌 **代码运行时间说明**：本代码由 GitHub Actions 在**交易日**的**北京时间 09:05 至 16:00** 之间运行。</p>
-        <p>📌 **可转债计算说明**：可转债平均价格的计算已**剔除**价格大于或等于 {MAX_CB_PRICE:.2f} 的标的，以排除畸高价格的影响。</p>
+        <p>📌 **可转债计算说明**：可转债平均价格的计算已**剔除**价格大于或等于 {MAX_CB_PRICE:.2f} 的标的，以排除畸高价格的影响。（暂停该功能）</p>
         <p>注意：本页面每 {REFRESH_INTERVAL // 60} 分钟自动重新加载，以获取最新数据。</p>
     </div>
 </body>
