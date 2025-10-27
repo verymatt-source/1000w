@@ -10,8 +10,8 @@ name: 证券公司价格定时更新与部署
 on:
   # 定时触发器 (Schedule Trigger)
   schedule:
-    # 新的定时任务：周一到周五，北京时间 9:05 - 15:35 运行 (UTC 1:05 - 7:35)
-    - cron: '5,35 1-7 * * 1-5'
+    # 设置为 24小时 / 每 30 分钟运行一次
+    - cron: '0,30 * * * *'
   
   # 手动触发器 (Manual Trigger)
   workflow_dispatch:
