@@ -7,42 +7,46 @@ from datetime import datetime
 OUTPUT_FILE = "index_price.html"
 REFRESH_INTERVAL = 1800  # 自动刷新时间（秒）。30分钟 = 30 * 60 = 1800秒
 
-# 定义需要采集的证券列表和自定义的目标价位
-# 【模块化核心】：后续增加证券，只需在此字典中添加新的键值对
+# ======================= 模块化配置 1：新浪 API 数据源 =======================
+# 定义需要采集的证券/外汇列表和自定义的目标价位
 TARGET_STOCKS = {
     # 键是新浪API的股票代码格式，值是用户自定义的目标价位
     "sz399975": {
         "name": "证券公司指数",
         "code": "399975",
         "target_price": 700.00  # 您的预设目标价
-    }, # <-- 【修正】在这里添加逗号！
-    
+    }, 
     # 美元汇率：
     "fx_susdcny": {
         "name": "美元兑人民币",
         "code": "USD/CNY",
         "target_price": 7.0000  # 您的预设目标价（例如 7.00）
     }
-    # 示例：如果您要增加沪深300指数：
-    # "sh000300": {
-    #     "name": "沪深300指数",
-    #     "code": "000300",
-    #     "target_price": 4500.00
-    # }
 }
 
-# ==================== 价格获取函数 (模块化，返回字典数据) ====================
+# ======================= 模块化配置 2：集思录 API 数据源 (新增) =======================
+# 定义需要采集的集思录指数列表和自定义的目标价位
+JISILU_TARGETS = {
+    # 键是用于识别的自定义ID，值是配置信息
+    "cb_average_price": {
+        "name": "可转债平均价格",
+        "code": "JSL/CB",
+        "target_price": 130.00  # 您的预设目标价
+    }
+}
+
+
+# ==================== 采集函数 1：新浪 API (证券/外汇) ====================
 def get_data_sina(stock_api_code):
     """
-    使用新浪财经API获取指定证券的实时价格，并返回一个包含多项数据的字典。
-    
+    使用新浪财经API获取指定证券或外汇的实时价格，并返回一个包含多项数据的字典。
     参数:
         stock_api_code (str): 新浪API格式的代码 (例如 'sz399975')
-        
     返回:
         dict: 成功时返回包含所有数据的字典；失败时返回错误信息字典。
     """
     url = f"http://hq.sinajs.cn/list={stock_api_code}"
+    # 模拟浏览器请求
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Referer': 'http://finance.sina.com.cn/'
@@ -50,16 +54,18 @@ def get_data_sina(stock_api_code):
     
     try:
         response = requests.get(url, headers=headers, timeout=10) 
+        # 新浪API数据通常是 gbk 编码
         response.encoding = 'gbk'
         data = response.text
         
         if response.status_code != 200 or '="' not in data:
             return {"error": "获取失败", "detail": f"HTTP状态码: {response.status_code}"}
 
-        # 新浪数据格式：v_sz399975="指数名称,今开,昨收,当前价,最高,最低..."
+        # 数据格式：v_sz399975="指数名称,今开,昨收,当前价,最高,最低..."
         data_content = data.split('="')[1].strip('";')
         parts = data_content.split(',')
         
+        # 对于指数和外汇，当前价都在第4个位置 (parts[3])
         if len(parts) < 4:
             return {"error": "解析失败", "detail": "数据项不足"}
             
@@ -71,10 +77,55 @@ def get_data_sina(stock_api_code):
                 "current_price": float(current_price),
                 "open_price": float(parts[1]),  # 今开
                 "prev_close": float(parts[2]),  # 昨收
-                # 可以在这里添加更多数据，例如 parts[4] 最高价 等
             }
         else:
             return {"error": "解析失败", "detail": "价格数据无效"}
+            
+    except requests.exceptions.RequestException as e:
+        return {"error": "网络错误", "detail": str(e)}
+    except Exception as e:
+        return {"error": "未知错误", "detail": str(e)}
+
+
+# ==================== 采集函数 2：集思录 API (可转债平均价格) (新增) ====================
+def get_data_jisilu():
+    """
+    使用集思录API获取可转债指数数据，提取平均价格。
+    由于集思录 API 接口稳定，此函数独立于新浪 API。
+    
+    返回:
+        dict: 成功时返回包含当前价位的字典；失败时返回错误信息字典。
+    """
+    # 这是集思录可转债指数的公开JSON API接口
+    url = "https://www.jisilu.cn/webapi/cb/index_data/"
+    # 必须添加 Referer 才能成功获取数据
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Referer': 'https://www.jisilu.cn/' 
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        # 集思录数据是JSON格式，Python可以直接解析
+        data = response.json()
+        
+        if response.status_code != 200 or 'data' not in data:
+            return {"error": "获取失败", "detail": f"HTTP状态码: {response.status_code}"}
+        
+        # 【关键解析】集思录数据结构：data['data']['index_data'][0]['cb_average_price']
+        # 'cb_average_price' 即为页面上的平均价格
+        average_price = data['data']['index_data'][0]['cb_average_price']
+        
+        if average_price:
+            # 成功解析数据
+            return {
+                "current_price": float(average_price),
+                # 集思录API不返回今开/昨收，设为 None 保持数据结构一致性
+                "open_price": None, 
+                "prev_close": None, 
+            }
+        else:
+            return {"error": "解析失败", "detail": "未找到平均价格数据"}
             
     except requests.exceptions.RequestException as e:
         return {"error": "网络错误", "detail": str(e)}
@@ -110,13 +161,17 @@ def create_html_content(stock_data_list):
     for data in stock_data_list:
         
         # 确定价格的显示颜色
-        # 如果当前价低于目标价，显示绿色；高于目标价，显示橙色
         price_color = '#27ae60'  # 默认绿色
         if data['is_error']:
             price_display = f"数据错误: {data['detail']}"
             price_color = '#e74c3c'
         else:
-            price_display = f"{data['current_price']:.3f}"
+            # 优化：根据数据代码确定小数点位数
+            if data['code'] == 'USD/CNY':
+                price_display = f"{data['current_price']:.4f}" # 汇率保留四位小数
+            else:
+                price_display = f"{data['current_price']:.3f}" # 指数/可转债保留三位小数
+                
             if data['current_price'] >= data['target_price']:
                 price_color = '#e67e22' # 橙色
             
@@ -187,11 +242,30 @@ if __name__ == "__main__":
     
     all_stock_data = []
     
-    # 【模块化运行】：遍历配置中的所有证券
+    # ================= 运行模块 1：新浪 API =================
+    # 【模块化运行】：遍历配置中的所有新浪证券/外汇
     for api_code, config in TARGET_STOCKS.items():
         
         # 1. 尝试获取 API 数据 (返回字典)
         api_data = get_data_sina(api_code)
+        
+        # 2. 合并配置数据和 API 数据
+        final_data = {
+            "name": config["name"],
+            "code": config["code"],
+            "target_price": config["target_price"],
+            "is_error": "error" in api_data,
+            **api_data  # 合并 API 返回的所有键值对
+        }
+        all_stock_data.append(final_data)
+        
+    # ================= 运行模块 2：集思录 API (新增) =================
+    # 【模块化运行】：遍历配置中的所有集思录指数
+    for index_id, config in JISILU_TARGETS.items():
+        
+        # 1. 尝试获取 API 数据 (返回字典)
+        # 目前集思录 API 是通用接口，不需要 index_id，但保留 config 用于目标价位配置
+        api_data = get_data_jisilu()
         
         # 2. 合并配置数据和 API 数据
         final_data = {
@@ -211,6 +285,6 @@ if __name__ == "__main__":
         # 文件仍写入当前工作目录的 index_price.html
         with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
             f.write(html_content)
-        print(f"成功更新文件: {OUTPUT_FILE}，包含 {len(all_stock_data)} 个证券数据。")
+        print(f"成功更新文件: {OUTPUT_FILE}，包含 {len(all_stock_data)} 个证券/指数数据。")
     except Exception as e:
         print(f"写入文件失败: {e}")
