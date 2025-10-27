@@ -33,20 +33,22 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11' # 使用一个较新的、稳定的 Python 版本
+          python-version: '3.11' 
 
       # 3. 安装依赖 (requests)
       - name: Install dependencies
         run: pip install requests
         
-     # 4. 运行 Python 脚本
-      # 明确指定工作目录为仓库根目录，确保文件生成在正确位置
+      # 4. 运行 Python 脚本
+      # 使用 python -u 来确保输出被及时刷新到日志
       - name: Run price scraper
-        # ${{ github.workspace }} 变量指向仓库的根目录
-        working-directory: ${{ github.workspace }}
-        run: python hs.py
+        run: python -u hs.py
 
-      # 5. 配置 Pages 部署环境 (保持不变)
+      # 4.1 🛠 调试步骤：检查文件是否生成 
+      - name: Verify file creation
+        run: ls -al
+        
+      # 5. 配置 Pages 部署环境
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
@@ -54,9 +56,9 @@ jobs:
       - name: Upload artifact for deployment
         uses: actions/upload-pages-artifact@v3
         with:
-          path: 'index_price.html' # 现在它一定能找到这个文件
+          path: 'index_price.html' 
 
-      # 7. 部署到 GitHub Pages (保持不变)
+      # 7. 部署到 GitHub Pages
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
