@@ -2,19 +2,19 @@
 # ------------------------------------------------------------
 # 1. 基础信息配置
 # ------------------------------------------------------------
-name: 价格监控自动化部署
+name: 证券公司价格定时更新与部署
 
 # ------------------------------------------------------------
 # 2. 触发器配置 (何时运行)
 # ------------------------------------------------------------
 on:
-  # 定时触发器 (Schedule Trigger)：
-  # 运行时间: 周一至周五，北京时间 9:30-11:30 及 13:00-15:00，每隔30分钟运行一次。
-  # 对应 UTC 时间: 01:30, 02:00, 02:30, 03:00, 03:30, 05:00, 05:30, 06:00, 06:30, 07:00。
+  # 定时触发器 (Schedule Trigger)
   schedule:
+    # 运行时间: 周一至周五，北京时间 9:30-11:30 及 13:00-15:00，每隔30分钟运行一次。
+    # 对应 UTC 时间: 01:30, 02:00, 02:30, 03:00, 03:30, 05:00, 05:30, 06:00, 06:30, 07:00。
     - cron: '0,30 1-3,5-7 * * 1-5'
   
-  # 手动触发器 (Manual Trigger)：允许通过 GitHub 界面手动运行
+  # 手动触发器 (Manual Trigger)
   workflow_dispatch:
 
 # ------------------------------------------------------------
@@ -26,70 +26,69 @@ concurrency:
 
 # ------------------------------------------------------------
 # 4. 权限配置 (Permissions)
-# 【关键】部署到 GitHub Pages 必须授予这些权限。
-# - contents: write：用于将更新后的 notification_log.json 提交回 Pages 分支，实现状态持久化。
-# - pages 和 id-token：用于 Pages 部署认证。
+# 【关键】部署到 GitHub Pages 必须授予这些权限
+# contents: write 用于将更新后的 notification_log.json 提交回 Pages 分支。
+# pages 和 id-token 用于 Pages 部署认证。
 # ------------------------------------------------------------
 permissions:
-  contents: write
-  pages: write
-  id-token: write
+  contents: write     
+  pages: write       
+  id-token: write    
 
 # ------------------------------------------------------------
-# 5. 工作任务 (Jobs)
+# 5. 任务 (Jobs) 配置
 # ------------------------------------------------------------
 jobs:
-  # ------------------------------------------------------------
-  # 1. 构建任务 (Build/Script Execution)
-  # ------------------------------------------------------------
-  build:
+  run_and_build:
     runs-on: ubuntu-latest
+    
+    # 设置环境变量 (Environment Variable)
+    env:
+      TZ: 'Asia/Shanghai' 
+      # 【✅ 关键修正：添加此行，注入 Server酱 Secret Key ✅】
+      # 变量名 SERVERCHAN_SCKEY 必须与 hs.py 中读取的变量名完全一致。
+      SERVERCHAN_SCKEY: ${{ secrets.SERVERCHAN_SCKEY }} 
+    
     steps:
-      # 1. 检出代码
-      - name: ⬇️ 检出代码
+      # 1. 检出代码 (Checkout)
+      - name: 检出仓库代码
         uses: actions/checkout@v4
-        
+
       # 2. 设置 Python 环境
-      - name: 🐍 设置 Python 3.x
+      - name: 设置 Python 3.11 环境
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
-          
-      # 3. 安装依赖 (requests)
-      - name: 📦 安装 Python 依赖
+          python-version: '3.11' 
+
+      # 3. 安装依赖
+      - name: 安装 Python 依赖 (requests)
         run: pip install requests
         
-      # 4. 运行 Python 脚本并准备 Pages 部署文件
-      - name: 🚀 运行脚本并构建 Pages 目录
-        env:
-          # 从 Secrets 获取 Server酱密钥
-          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }} 
+      # 4. 运行脚本并构建站点目录
+      - name: 运行价格脚本并构建 _site 目录
         run: |
-          # 1. 创建 Pages 标准输出目录 _site
+          # 1. 创建 Pages 标准的输出目录 _site
           mkdir _site
-          
-          # 2. 运行 Python 脚本。脚本运行时会读取/写入 notification_log.json
+          # 2. 运行 Python 脚本。脚本运行时会读/写 notification_log.json
           python -u hs.py
-          
-          # 3. 移动 HTML 文件。Pages 默认寻找 index.html
+          # 3. 移动并重命名文件。
           mv index_price.html _site/index.html 
-          
-          # 4. 【状态持久化】：将日志文件移动到 _site 目录，以便 Pages 上传并持久化状态
+          # 4. 【关键】：将日志文件也移动到 _site 目录，以便 Actions 上传并持久化
           if [ -f notification_log.json ]; then
             mv notification_log.json _site/
           fi
           
-      # 5. 调试步骤：检查 _site 目录内容
-      - name: 🔍 检查 _site 目录结构
+      # 5. 🛠 调试步骤：检查 _site 目录内容
+      - name: 检查 _site 目录内容
         run: ls -R _site/
         
-      # 6. 配置和上传 Pages Artifact
-      # 使用 actions/configure-pages 准备 Pages 环境
-      - name: ⚙️ 配置 GitHub Pages 部署
+      # ------------------------------------------------------------
+      # 【部署修复】上传部署文件 (Artifacts)，解决 "No artifacts named..." 错误
+      # ------------------------------------------------------------
+      - name: 配置 GitHub Pages 部署
         uses: actions/configure-pages@v5
 
-      # 使用 actions/upload-pages-artifact 上传 _site 目录作为 Artifact
-      - name: ⬆️ 上传待部署文件 (Pages Artifact)
+      - name: 上传待部署的文件 (Pages Artifact)
         uses: actions/upload-pages-artifact@v3
         with:
           path: '_site' # 上传 _site 目录下的所有内容
@@ -97,20 +96,16 @@ jobs:
       # ------------------------------------------------------------
 
   # ------------------------------------------------------------
-  # 2. 部署任务 (Deployment)
+  # 6. 部署到 GitHub Pages (Deployment)
   # ------------------------------------------------------------
   deploy:
-    # 依赖于 build 任务成功完成
-    needs: build
-    
-    # 部署环境配置
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-      
     runs-on: ubuntu-latest
-    
+    # 部署任务依赖于 run_and_build 任务
+    needs: run_and_build 
     steps:
-      - name: 🚀 部署到 GitHub Pages
+      - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4 # 自动下载 Artifact 并部署到 Pages
+        uses: actions/deploy-pages@v4
