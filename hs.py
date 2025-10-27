@@ -45,7 +45,7 @@ TARGET_STOCKS = [
         "name": "证券公司指数",
         "code": "399975",
         "type": "SZ", # 深圳指数
-        "update_schedule": "MARKET" # 🚩 新增采集开关
+        "update_schedule": "MARKET" # 🚩 采集开关
     },
     # 可以在此添加更多股票或指数
 ]
@@ -56,13 +56,13 @@ CALCULATED_TARGETS = [
         "name": "美元兑人民币",
         "code": "USD/CNY",
         "api": "sina",
-        "update_schedule": "24H" # 🚩 新增采集开关
+        "update_schedule": "24H" # 🚩 采集开关
     },
     {
         "name": "可转债平均价",
         "code": "CB/AVG",
         "api": "eastmoney",
-        "update_schedule": "MARKET" # 🚩 新增采集开关
+        "update_schedule": "MARKET" # 🚩 采集开关
     }
 ]
 
@@ -111,7 +111,7 @@ def map_schedule_to_display(schedule_key):
 
 # ==============================================================================
 
-# ======================= API 采集模块 (保持原貌) =======================
+# ======================= API 采集模块 (修正美元汇率解析逻辑) =======================
 
 def get_stock_data_from_sina(code):
     """
@@ -119,12 +119,14 @@ def get_stock_data_from_sina(code):
     返回包含当前价 (current_price) 的字典，失败则返回 error。
     """
     if '/' in code: # 外汇，如 USD/CNY
-        full_code = code.replace('/', '')
+        # 外汇API格式：list=forex_USDCNY
+        full_code = code.replace('/', '') 
         url = f"http://hq.sinajs.cn/list=forex_{full_code}"
-        match_pattern = re.compile(r'\"([^\"]*)\"')
+        # 匹配双引号中的所有内容
+        match_pattern = re.compile(r'\"([^\"]*)\"') 
     else: # 股票或指数，如 399975
+        # 股票/指数API格式：list=sz399975 (需要 type 字段，但这里为了保持简洁使用默认，如果失败则需要修改配置 type)
         url = f"http://hq.sinajs.cn/list={code}"
-        # 股票/指数数据在字符串中位置固定
         match_pattern = re.compile(r'\"([^\"]*)\"')
 
     try:
@@ -135,34 +137,38 @@ def get_stock_data_from_sina(code):
         match = match_pattern.search(data_str)
         if match:
             values = match.group(1).split(',')
+            
             if '/' in code: # 外汇 (格式：名称,现价,买入价,卖出价,昨日收盘价,开盘价,最高价,最低价,日期,时间)
-                # 现价在第 2 个位置 (索引 1)
-                current_price = float(values[1])
+                # 现价在第 2 个位置 (索引 1)。
+                if len(values) > 1 and values[1].replace('.', '', 1).isdigit():
+                    current_price = float(values[1])
+                else:
+                    return {"error": f"外汇API解析值不足/格式错误: {data_str.strip()}"}
             else: # 股票/指数 (格式：名称,开盘价,昨日收盘价,现价...)
-                # 现价在第 4 个位置 (索引 3)
-                current_price = float(values[3])
+                # 现价在第 4 个位置 (索引 3)。
+                if len(values) > 3 and values[3].replace('.', '', 1).isdigit():
+                    current_price = float(values[3])
+                else:
+                    return {"error": f"股票API解析值不足/格式错误: {data_str.strip()}"}
             
             return {
                 "current_price": current_price
             }
         
-        # print(f"新浪API返回数据格式错误: {data_str}")
-        return {"error": "API返回格式错误"}
+        return {"error": f"API返回格式错误或无数据: {data_str.strip()}"}
 
     except Exception as e:
-        # print(f"新浪API请求失败 ({code}): {e}")
         return {"error": str(e)}
 
 
 def get_cb_codes_from_eastmoney(code="CB/AVG"):
     """
     从东方财富网 API 采集所有可转债数据，计算平均价。
-    由于数据量大，仅返回平均价。
     """
     # 东方财富可转债数据API (所有数据)
     url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
     params = {
-        'callback': 'jQuery112306263884846433555_1679051065608', # 随机回调函数名
+        'callback': 'jQuery112306263884846433555_1679051065608', 
         'sortColumns': 'TRADE_DATE',
         'sortTypes': '-1',
         'pageSize': '1000', # 确保包含所有可转债
@@ -178,8 +184,7 @@ def get_cb_codes_from_eastmoney(code="CB/AVG"):
         # 移除 JSONP 封装层，提取 JSON 字符串
         match = re.search(r'\((\{.*\})\)', response.text)
         if not match:
-            # print("东方财富API返回数据格式错误，无法解析JSONP。")
-            return {"error": "API返回格式错误"}
+            return {"error": "API返回格式错误，无法解析JSONP。"}
 
         json_data = json.loads(match.group(1))
         data_list = json_data['result']['data']
@@ -203,7 +208,6 @@ def get_cb_codes_from_eastmoney(code="CB/AVG"):
             return {"error": "未获取到有效可转债数据"}
 
     except Exception as e:
-        # print(f"东方财富API请求失败 ({code}): {e}")
         return {"error": str(e)}
 
 
@@ -216,7 +220,6 @@ def load_notification_log():
             with open(NOTIFICATION_LOG_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except Exception:
-            # 文件损坏或格式错误，返回空字典
             return {}
     return {}
 
@@ -266,43 +269,40 @@ def main():
     today_date = datetime.now().strftime('%Y-%m-%d')
     notification_log = load_notification_log()
     
-    # ================= 运行模块 1：根据时间开关过滤目标 (修复逻辑) =================
+    # ================= 运行模块 1：根据时间开关预处理目标 (修复标的丢失逻辑) =================
     
-    # 1. 判断当前时间状态
     is_market_open = is_a_share_trading_time()
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 当前A股交易时段状态: {'开放' if is_market_open else '休市'}")
     
-    # 2. 构造本次需要采集的标的列表
-    all_targets = []
-    
-    # --- 统一构造逻辑 ---
-    
-    def add_targets_to_list(config_list, api_func_map):
+    # 存储所有配置的列表，无论是否采集
+    all_targets_config = []
+    all_stock_data = [] 
+
+    # --- 构造所有标的的配置数据结构 ---
+    def prepare_all_configs(config_list, api_func_map):
         for config in config_list:
             code = config['code']
-            # 新增逻辑：如果未设置 schedule，默认为 MARKET
             schedule_mode = config.get("update_schedule", "MARKET") 
             
-            # 🚩 过滤逻辑：如果是 MARKET 模式且当前非交易时间，则跳过
-            if schedule_mode == "MARKET" and not is_market_open:
-                # 打印跳过信息，但**不退出脚本**，让 24H 模式的标的继续运行
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] 跳过 {config.get('name', code)} ({code})，当前非交易时间（{schedule_mode} 模式）。")
-                continue
-                
-            target_price = TARGET_PRICES.get(code)
-            target_note = TARGET_NOTES.get(code, "无")
+            item = {
+                "name": config["name"],
+                "code": code,
+                "target_price": TARGET_PRICES.get(code),
+                "target_ratio": None,
+                "note": TARGET_NOTES.get(code, "无"),
+                "schedule_mode": schedule_mode,
+                "is_error": False, 
+                "current_price": None, 
+                "is_scheduled_skip": False, # 🚩 关键：新标记，用于区分“休市”和“采集失败”
+                "api_func": api_func_map.get(code, get_stock_data_from_sina) # API func
+            }
             
-            # 确定API函数
-            api_func = api_func_map.get(code, get_stock_data_from_sina)
-
-            all_targets.append({
-                "target_code": code,
-                "target_price": target_price,
-                "target_note": target_note,
-                "config": config,
-                "api_func": api_func,
-                "schedule_mode": schedule_mode
-            })
+            # 🚩 核心修复：如果 MARKET 模式且非交易时间，则标记为跳过采集，但保留在列表中
+            if schedule_mode == "MARKET" and not is_market_open:
+                item["is_scheduled_skip"] = True
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] 休市跳过采集 {item['name']} ({code})。")
+            
+            all_targets_config.append(item)
             
     # 定义API映射，用于 CALCULATED_TARGETS
     calculated_api_map = {
@@ -310,84 +310,58 @@ def main():
         "USD/CNY": get_stock_data_from_sina # 外汇也用sina
     }
 
-    add_targets_to_list(TARGET_STOCKS, {})
-    add_targets_to_list(CALCULATED_TARGETS, calculated_api_map)
+    prepare_all_configs(TARGET_STOCKS, {})
+    prepare_all_configs(CALCULATED_TARGETS, calculated_api_map)
         
-    # 如果没有需要采集的标的，则结束运行
-    if not all_targets:
-        # 即使没有要采集的，也应该生成一个空表格，防止页面错误。
-        # 修复逻辑：为了保证页面能正常显示，即使没有数据，也要调用 generate_html
-        print("所有标的均在休市模式下，本次运行无数据采集任务，生成空报告。")
-        generate_html([])
-        return
-
     # ================= 运行模块 2：采集数据 =================
 
-    all_stock_data = [] 
-    
-    for target in all_targets:
+    for item in all_targets_config:
         
-        # 重新解包变量
-        target_code = target['target_code']
-        target_price = target['target_price']
-        target_note = target['target_note']
-        config = target['config']
-        api_func = target['api_func']
-        
+        # 针对休市跳过采集的标的，直接添加到最终列表，不进行API调用
+        if item["is_scheduled_skip"]:
+            all_stock_data.append(item)
+            continue
+            
         # 调用 API 采集数据
-        # print(f"[{datetime.now().strftime('%H:%M:%S')}] 正在采集 {config['name']} ({target_code})...")
-        api_data = api_func(target_code) 
+        api_data = item['api_func'](item['code']) 
         
-        # 构造最终的数据字典
-        final_data = {
-            "name": config["name"],
-            "code": target_code,
-            "target_price": target_price, # 引用集中配置的目标价
-            "note": target_note,         # 引用集中配置的备注
-            "schedule_mode": target['schedule_mode'], # 【关键】新增字段
-            "is_error": "error" in api_data,
-            "current_price": api_data.get("current_price"),
-            **api_data
-        }
+        # 更新 item 结构
+        item["is_error"] = "error" in api_data
+        item["current_price"] = api_data.get("current_price")
         
         # 对于可转债，动态修改名称以显示计算基数
-        if 'count' in api_data and not final_data['is_error']:
-            final_data['name'] = f"可转债平均价格 (基于{api_data['count']}个代码计算)"
-        else:
-            final_data['name'] = config['name'] 
-            
-        all_stock_data.append(final_data)
+        if 'count' in api_data and not item['is_error']:
+            item['name'] = f"可转债平均价格 (基于{api_data['count']}个代码计算)"
+        
+        all_stock_data.append(item)
         
     # ================= 运行模块 3：计算目标比例并排序 =================
     
     # 1. 计算目标比例 (Target Ratio): (当前价位 - 目标价位) / 当前价位
     for item in all_stock_data:
-        item['target_ratio'] = None 
-        
-        if not item['is_error'] and item['current_price'] is not None and item['current_price'] != 0:
-            current_price = item['current_price']
-            target_price = item['target_price']
-            
-            # 只有在设置了目标价时才计算比例
-            if target_price is not None:
-                 # 计算目标比例
-                item['target_ratio'] = (current_price - target_price) / current_price
+        # 仅对非跳过、非错误、有当前价、有目标价的标的计算比例
+        if not item['is_scheduled_skip'] and not item['is_error'] and \
+           item['current_price'] is not None and item['current_price'] != 0 and \
+           item['target_price'] is not None:
+             
+            # 计算目标比例
+            item['target_ratio'] = (item['current_price'] - item['target_price']) / item['current_price']
             
     # 2. 按目标比例升序排序 (从低到高)
-    # 将 None 值 (无目标价或采集失败) 视为最大值进行排序
+    # 将 None 值 (无目标价、采集失败或休市) 视为最大值进行排序
     all_stock_data.sort(key=lambda x: x['target_ratio'] if x['target_ratio'] is not None else float('inf'))
     
     # ================= 运行模块 4：通知与输出 =================
 
-    # 1. 触发通知逻辑 (保持不变)
+    # 1. 触发通知逻辑 
     log_updated = False
     for item in all_stock_data:
         code = item['code']
         name = item['name']
         ratio = item['target_ratio']
         
-        # 只有在采集成功且设置了目标价时才检查
-        if item['is_error'] or ratio is None:
+        # 只有在采集成功且设置了目标价时才检查，跳过休市和采集失败的
+        if item['is_scheduled_skip'] or item['is_error'] or ratio is None:
             continue
             
         # 触发条件：abs(目标比例) <= 容忍度
@@ -397,10 +371,8 @@ def main():
 
         if is_triggered and not is_notified_today:
             
-            # 构造通知内容
+            # 构造通知内容 (保持了您要求的 Markdown 格式)
             title = f"【{name}】到达目标价位！！！" 
-            
-            # 使用 Markdown 表格，更清晰
             content = (
                 f"### 🎯 价格监控提醒\n\n"
                 f"**标的名称：** {name}\n\n"
@@ -442,14 +414,14 @@ def generate_html(all_stock_data):
     table_rows = []
 
     # --- 1. 生成表格内容 ---
-    # 【修复重点】：确保这里使用了 '目标比例' 而不是 '目标偏离度'，并保持原有的表格样式。
+    # 🚩 核心修复：确保这里使用 '目标比例' 并保持原有的表格样式。
     for data in all_stock_data:
         # 默认值
         target_display = "---"
-        price_display = "采集失败"
+        price_display = "---"
         ratio_display = "---"
-        price_color = '#e74c3c' # 红色
-        ratio_color = '#3498db' # 蓝色
+        price_color = '#7f8c8d' # 默认灰色
+        ratio_color = '#7f8c8d' # 默认灰色
         
         note_display = data.get('note', '无')
         
@@ -457,8 +429,17 @@ def generate_html(all_stock_data):
         if data.get('target_price') is not None:
             target_display = f"{data['target_price']:.4f}"
             
-        # 价格显示
-        if not data['is_error'] and data['current_price'] is not None:
+        # 🚩 区分：休市（Scheduled Skip） vs. 采集失败（API Error）
+        if data.get("is_scheduled_skip"):
+            price_display = "休市"
+            price_color = '#7f8c8d' # 灰色
+            
+        elif data['is_error']:
+            price_display = "采集失败"
+            price_color = '#e74c3c' # 红色
+        
+        # 价格和比例显示 (仅在采集成功时)
+        elif data['current_price'] is not None:
             price_display = f"{data['current_price']:.4f}"
             price_color = '#34495e' # 默认黑色/深色
             
@@ -475,7 +456,7 @@ def generate_html(all_stock_data):
                 else:
                     ratio_color = '#3498db' # 蓝色（恰好等于）
             
-        # 🚩 【新增】获取并格式化运行方式字段
+        # 获取并格式化运行方式字段
         schedule_display = map_schedule_to_display(data.get('schedule_mode', '未知'))
 
         # 保持原版 HTML 结构和字段顺序，仅新增“运行方式”字段。
