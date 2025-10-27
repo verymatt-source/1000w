@@ -4,10 +4,9 @@ import time
 from datetime import datetime
 
 # --- 配置 ---
-# 修正：将 OUTPUT_DIR 调整为 Linux/PythonAnywhere 环境下的相对路径。
-# os.path.dirname(os.path.abspath(__file__)) 获取当前脚本所在的绝对目录。
-OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__)) 
-OUTPUT_FILE = os.path.join(OUTPUT_DIR, "index_price.html")
+# 修正：将 OUTPUT_DIR 和 OUTPUT_FILE 简化为当前工作目录下的文件名
+# 在 GitHub Actions 中，直接使用文件名会在当前运行目录生成，这是我们需要的。
+OUTPUT_FILE = "index_price.html"
 
 # 自动刷新时间（秒）。30分钟 = 30 * 60 = 1800秒
 # 注意：在 PythonAnywhere 上你需要配置一个每隔 30 分钟运行一次的“定时任务”
@@ -83,11 +82,8 @@ def create_html_content(name, price):
 
 # --- 主逻辑 ---
 if __name__ == "__main__":
-    # 确保输出目录存在
-    if not os.path.exists(OUTPUT_DIR):
-        # 在 PythonAnywhere 中，脚本目录通常是存在的，但保留这条语句以增加健壮性。
-        os.makedirs(OUTPUT_DIR)
-        
+    # 删除创建目录的逻辑，因为现在 OUTPUT_FILE 是纯文件名，不需要创建目录
+
     # 尝试获取价格
     index_name, current_price = get_sz399975_price_sina()
 
@@ -96,15 +92,13 @@ if __name__ == "__main__":
         html_content = create_html_content(index_name, current_price)
     else:
         # 如果获取失败，写入错误提示
-        # 注意：这里的 current_price 是错误详情
         error_message = f"数据获取失败！原因: {index_name}。详细: {current_price}"
         html_content = create_html_content("错误", error_message)
-        
+
     try:
-        # 使用 utf-8 编码写入文件
+        # 使用新的 OUTPUT_FILE 变量写入当前工作目录
         with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
             f.write(html_content)
-        # 这里的 print 信息将输出到 PythonAnywhere 定时任务的日志中
         print(f"成功更新文件: {OUTPUT_FILE}，价格: {current_price}")
     except Exception as e:
         print(f"写入文件失败: {e}")
