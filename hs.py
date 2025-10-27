@@ -40,10 +40,6 @@ JISILU_TARGETS = {
 def get_data_sina(stock_api_code):
     """
     使用新浪财经API获取指定证券或外汇的实时价格，并返回一个包含多项数据的字典。
-    参数:
-        stock_api_code (str): 新浪API格式的代码 (例如 'sz399975')
-    返回:
-        dict: 成功时返回包含所有数据的字典；失败时返回错误信息字典。
     """
     url = f"http://hq.sinajs.cn/list={stock_api_code}"
     # 模拟浏览器请求
@@ -87,21 +83,17 @@ def get_data_sina(stock_api_code):
         return {"error": "未知错误", "detail": str(e)}
 
 
-# ==================== 采集函数 2：集思录 API (可转债平均价格) (新增) ====================
+# ==================== 采集函数 2：集思录 API (可转债平均价格) (修正 Referer) ====================
 def get_data_jisilu():
     """
     使用集思录API获取可转债指数数据，提取平均价格。
-    由于集思录 API 接口稳定，此函数独立于新浪 API。
-    
-    返回:
-        dict: 成功时返回包含当前价位的字典；失败时返回错误信息字典。
     """
     # 这是集思录可转债指数的公开JSON API接口
     url = "https://www.jisilu.cn/webapi/cb/index_data/"
-    # 必须添加 Referer 才能成功获取数据
+    # 【关键修正】必须添加正确的 Referer 才能成功获取数据
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Referer': 'https://www.jisilu.cn/' 
+        'Referer': 'https://www.jisilu.cn/web/data/cb/index' # 从可转债指数页面发出请求
     }
     
     try:
@@ -113,20 +105,22 @@ def get_data_jisilu():
             return {"error": "获取失败", "detail": f"HTTP状态码: {response.status_code}"}
         
         # 【关键解析】集思录数据结构：data['data']['index_data'][0]['cb_average_price']
-        # 'cb_average_price' 即为页面上的平均价格
         average_price = data['data']['index_data'][0]['cb_average_price']
         
         if average_price:
             # 成功解析数据
             return {
                 "current_price": float(average_price),
-                # 集思录API不返回今开/昨收，设为 None 保持数据结构一致性
                 "open_price": None, 
                 "prev_close": None, 
             }
         else:
             return {"error": "解析失败", "detail": "未找到平均价格数据"}
             
+    except requests.exceptions.JSONDecodeError as e:
+        # 【错误捕捉】捕获非JSON返回，即您之前遇到的错误
+        detail = f"Expecting value: line 1 column 1 (char 0)。原因可能是 Referer 不正确或 API 拒绝请求。原始错误：{e}"
+        return {"error": "数据错误", "detail": detail}
     except requests.exceptions.RequestException as e:
         return {"error": "网络错误", "detail": str(e)}
     except Exception as e:
@@ -137,9 +131,6 @@ def get_data_jisilu():
 def create_html_content(stock_data_list):
     """
     生成带有价格表格和自动刷新功能的HTML内容。
-    
-    参数:
-        stock_data_list (list): 包含所有证券数据字典的列表。
     """
     # 获取时间戳 (TZ环境变量已在YML中设置，此处获取的是北京时间)
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S (北京时间)')
@@ -163,6 +154,7 @@ def create_html_content(stock_data_list):
         # 确定价格的显示颜色
         price_color = '#27ae60'  # 默认绿色
         if data['is_error']:
+            # 错误信息显示红色
             price_display = f"数据错误: {data['detail']}"
             price_color = '#e74c3c'
         else:
@@ -259,12 +251,11 @@ if __name__ == "__main__":
         }
         all_stock_data.append(final_data)
         
-    # ================= 运行模块 2：集思录 API (新增) =================
+    # ================= 运行模块 2：集思录 API =================
     # 【模块化运行】：遍历配置中的所有集思录指数
     for index_id, config in JISILU_TARGETS.items():
         
         # 1. 尝试获取 API 数据 (返回字典)
-        # 目前集思录 API 是通用接口，不需要 index_id，但保留 config 用于目标价位配置
         api_data = get_data_jisilu()
         
         # 2. 合并配置数据和 API 数据
