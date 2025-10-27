@@ -192,16 +192,22 @@ def get_data_sina(stock_api_code):
 # ==================== 采集函数 2：可转债代码列表 (东方财富 API) (保持不变) ====================
 def get_cb_codes_from_eastmoney():
     """从东方财富API获取所有可转债的代码列表。"""
-    url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+    
+    # 修正后的 API URL
+    url = "https://push2.eastmoney.com/api/qt/clist/get"
+    
+    # 修正后的 API 请求参数
     params = {
-        'sortTypes': '-1',
-        'sortFids': 'f266',
-        'pageSize': '1000', # 确保一次性获取所有
-        'pageNumber': '1',
-        'reportName': 'RPT_BOND_CB_LIST',
-        'columns': 'f2,f14', # f2是代码，f14是简称
-        'source': 'WEB',
-        'client': 'WEB'
+        'pn': '1',               # 页码
+        'pz': '1000',            # 每页数量，确保一次获取所有
+        'fs': 'm:100+t:3,m:100+t:4,m:100+t:1,m:100+t:2', # 筛选条件：已上市可转债，防止获取到未发行的
+        'fields': 'f12,f14',     # f12: 代码, f14: 名称
+        'fid': 'f3',             # 排序字段
+        'ut': 'bd1d9ddb04089700cf9c3f8865899b59', # 统一的 ut 参数
+        'fltt': '2',
+        'invt': '2',
+        'cb:0.01:9999.00:0',     # 避免接口缓存，随机数或时间戳
+        '_': int(time.time() * 1000) # 时间戳
     }
     
     try:
@@ -209,12 +215,13 @@ def get_cb_codes_from_eastmoney():
         response.raise_for_status()
         data = response.json()
         
-        if data['code'] != 200:
-            return None, f"API返回错误码: {data['code']}"
+        # API 结构不同，数据位于 data['data']['diff']
+        if data.get('data') is None or 'diff' not in data['data']:
+            return None, f"API返回错误码: {data.get('code', '未知')}"
 
         codes_list = []
-        for item in data['result']['data']:
-            code = item['f2'] # 证券代码
+        for item in data['data']['diff']:
+            code = item['f12'] # 证券代码
             # 统一为新浪 API 格式：沪市(sh) 或 深市(sz)
             prefix = 'sh' if code.startswith('11') or code.startswith('13') else 'sz'
             codes_list.append(f"{prefix}{code}")
