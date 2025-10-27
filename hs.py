@@ -1,596 +1,557 @@
 import requests
 import os
-import time
-import json # 用于解析东方财富API返回的JSON数据 / 【新增】用于日志文件操作
-import re # 用于解析新浪批量API返回的字符串数据
+import json
+import re
+import calendar
 from datetime import datetime
-from operator import itemgetter # 用于列表排序
-import calendar # 【新增】用于判断周末/交易日
+from operator import itemgetter
+from typing import List, Dict, Any, Optional, Tuple, Union
 
-# --- 全局配置 ---
+# --- 🎯 核心配置常量 ---
 OUTPUT_FILE = "index_price.html"
-REFRESH_INTERVAL = 1800  # 网页自动刷新时间（秒）。30分钟 = 30 * 60 = 1800秒
-MAX_CB_PRICE = 9999.00 # 可转债计算平均价时可设置剔除价格，暂时不考虑剔除，因集思录、ninwin都没有剔除畸高数据
+REFRESH_INTERVAL = 1800  # 网页自动刷新时间（秒）。30分钟 = 1800秒
+MAX_CB_PRICE = 9999.00  # 可转债计算平均价时，用于剔除畸高价格的上限，目前设为不剔除
+NOTIFICATION_TOLERANCE = 0.0005  # 用于判断是否达到目标价位的浮点数容忍度。
+NOTIFICATION_LOG_FILE = "notification_log.json" # 记录已发送通知的日志文件
+SERVERCHAN_KEY = os.environ.get("SERVERCHAN_KEY") # Server酱通知密钥，从环境变量获取
 
-# ======================= 通知配置区域 (新增) =======================
-# 用于判断是否达到目标价位的浮点数容忍度。abs(目标比例) <= NOTIFICATION_TOLERANCE 视为触发
-NOTIFICATION_TOLERANCE = 0.0005 
-# 记录已发送通知的日志文件，用于实现每日只发送一次
-NOTIFICATION_LOG_FILE = "notification_log.json" 
-# =================================================================
-
-# ======================= 集中配置区域 (新增/修改) =======================
-
-# 1. 【新增】集中配置所有标的的【目标价位】
-# 键必须与 TARGET_STOCKS 或 CALCULATED_TARGETS 中 config['code'] 的值保持一致。
-TARGET_PRICES = {
-    "399975": 700.00,  # 证券公司指数
-    "USD/CNY": 6.8000, # 美元兑人民币
-    "CB/AVG": 115.00   # 可转债平均价格
-}
-
-# 2. 【新增】集中配置所有标的的【备注】
-# 键必须与 TARGET_STOCKS 或 CALCULATED_TARGETS 中 config['code'] 的值保持一致。
-TARGET_NOTES = {
-    "399975": "/暂无",
-    "USD/CNY": "/暂无",
-    "CB/AVG": "/暂无"
-}
-
-
-# ======================= 模块化配置 1：新浪 API 数据源 (指数/外汇) (修改) =======================
-# 定义需要采集的证券列表。目标价位已移至 TARGET_PRICES。
-TARGET_STOCKS = {
-    
-    "sz399975": {
+# --- 🚀 统一标的配置 (单一配置源) ---
+# 增加、删减标的，只需修改以下列表。
+#
+# 结构:
+# {
+#     "code": str,                # 标的唯一代码 (用于日志/唯一标识)
+#     "name": str,                # 显示名称
+#     "source_type": str,         # 数据来源/类型: "SINA_API", "CB_AVG_PRICE"
+#     "api_code": Optional[str],  # (仅 SINA_API): 实际用于新浪API请求的代码 (e.g., "sz399975")
+#     "target_price": float,      # 目标价位 (触发通知的阈值)
+#     "note": Optional[str]       # 策略备注信息
+# }
+ALL_TARGETS_CONFIG: List[Dict[str, Union[str, float, None]]] = [
+    # ------------------- 1. 新浪API/指数/外汇 -------------------
+    {
+        "code": "399975",
         "name": "证券公司指数",
-        "code": "399975", 
-        # "target_price": 700.00 # 已移除，改为引用 TARGET_PRICES
-    }, 
-    
-    # 美元汇率：
-    "fx_susdcny": {
-        "name": "美元兑人民币",
+        "source_type": "SINA_API",
+        "api_code": "sz399975",
+        "target_price": 700.00,
+        "note": "证券是牛市先锋，在700点以下积极定投，目标价位是未来牛市卖点。",
+    },
+    {
+        "code": "000001",
+        "name": "上证指数",
+        "source_type": "SINA_API",
+        "api_code": "sh000001",
+        "target_price": 3500.00,
+        "note": "大盘关键点位监控。",
+    },
+    {
         "code": "USD/CNY",
-        # "target_price": 7.0000 # 已移除，改为引用 TARGET_PRICES
-    }
-}
+        "name": "美元/人民币",
+        "source_type": "SINA_API",
+        "api_code": "fx_susdcny",
+        "target_price": 6.80,
+        "note": "人民币升值目标价位。",
+    },
+    # ------------------- 2. 自定义计算标的 -------------------
+    {
+        "code": "CB/AVG",
+        "name": "可转债平均价",
+        "source_type": "CB_AVG_PRICE",
+        "api_code": None, # 无需API代码，计算逻辑内部处理
+        "target_price": 105.00,
+        "note": "基于东方财富所有可转债的算术平均价，低于105是极佳的低吸区域。",
+    },
+]
 
-# ======================= 模块化配置 2：计算目标配置 (可转债) (修改) =======================
-CALCULATED_TARGETS = {
-    "cb_avg_price": {
-        "name": "可转债平均价格", 
-        "code": "CB/AVG", # 虚拟代码，用于显示和在 TARGET_PRICES 中查找配置
-        # "target_price": 130.00 # 已移除，改为引用 TARGET_PRICES
-    }
-}
 
-# ==================== 日志操作和通知函数 (新增) ====================
+# --- 🛠 实用工具函数 ---
 
-def load_notification_log():
-    """尝试加载通知日志文件。如果文件不存在或解析失败，返回空字典。"""
+def is_trading_day() -> bool:
+    """
+    判断当前是否为工作日 (周一至周五)。
+    此函数仅判断日期，不考虑法定节假日或休市。
+    
+    Returns:
+        bool: 如果是周一到周五则返回 True。
+    """
+    today = datetime.now()
+    # calendar.weekday() 返回 0 (周一) 到 6 (周日)
+    return calendar.weekday(today.year, today.month, today.day) < 5
+
+def load_notification_log() -> Dict[str, str]:
+    """
+    尝试从 JSON 文件加载通知日志。
+    日志结构: {"code": "YYYY-MM-DD"}
+    
+    Returns:
+        Dict[str, str]: 加载的日志字典；文件不存在或解析失败则返回空字典。
+    """
     if os.path.exists(NOTIFICATION_LOG_FILE):
         try:
             with open(NOTIFICATION_LOG_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except (IOError, json.JSONDecodeError):
-            print("警告：无法读取或解析通知日志文件，将使用新日志。")
+        except json.JSONDecodeError:
+            print(f"WARN: 日志文件 {NOTIFICATION_LOG_FILE} 解析失败，将使用新的空日志。")
             return {}
     return {}
 
-def save_notification_log(log_data):
-    """保存通知日志文件，用于记录通知历史。"""
+def save_notification_log(log_data: Dict[str, str]):
+    """
+    将通知日志保存到 JSON 文件。
+    
+    Args:
+        log_data (Dict[str, str]): 要保存的日志数据。
+    """
     try:
         with open(NOTIFICATION_LOG_FILE, 'w', encoding='utf-8') as f:
             json.dump(log_data, f, ensure_ascii=False, indent=4)
-        print(f"成功保存通知日志文件: {NOTIFICATION_LOG_FILE}")
-    except IOError as e:
-        print(f"错误：无法写入通知日志文件: {e}")
+        print(f"INFO: 成功保存通知日志到 {NOTIFICATION_LOG_FILE}")
+    except Exception as e:
+        print(f"ERROR: 保存通知日志失败: {e}")
 
+# --- 🌐 数据采集 API 函数 ---
 
-def send_serverchan_notification(title, content):
-    """通过 Server酱 发送通知。"""
-    # 从 Actions 环境变量中读取 SendKey (依赖 deploy.yml 中设置 SERVERCHAN_SCKEY)
-    SCKEY = os.environ.get('SERVERCHAN_SCKEY')
+def get_data_sina(stock_api_code: str) -> Optional[Dict[str, float]]:
+    """
+    从新浪财经API获取单个标的（股票/指数/外汇）的实时数据。
     
-    if not SCKEY:
-        print("警告：未找到 SERVERCHAN_SCKEY 环境变量，通知功能跳过。")
-        return False
+    Args:
+        stock_api_code (str): 带前缀的股票代码 (e.g., "sh000001", "fx_susdcny")。
+        
+    Returns:
+        Optional[Dict[str, float]]: 包含 'current_price' 和 'prev_close' 的字典，
+                                    如果获取失败则返回 None。
+    """
+    url = f"http://hq.sinajs.cn/list={stock_api_code}"
+    try:
+        response = requests.get(url, timeout=5)
+        response.encoding = 'gbk' # 新浪API返回是GBK编码
+        data = response.text
+        
+        # 使用正则表达式匹配和提取数据
+        match = re.search(r'="([^,"]+),([^,"]+),([^,"]+),([^,"]+)', data)
+        if match:
+            # 股票/指数: [3]是当前价，[2]是昨日收盘价
+            # 外汇: [1]是当前价，[2]是昨日收盘价
+            
+            # 判断是否为外汇（通过 fx_ 前缀判断）
+            if stock_api_code.startswith("fx_"):
+                current_price = float(match.group(1))
+                prev_close = float(match.group(2))
+            else:
+                current_price = float(match.group(4))
+                prev_close = float(match.group(3))
+                
+            return {
+                'current_price': current_price,
+                'prev_close': prev_close
+            }
+        
+    except Exception as e:
+        print(f"ERROR: 获取新浪API数据失败 ({stock_api_code}): {e}")
+        
+    return None
 
-    url = f"https://sctapi.ftqq.com/{SCKEY}.send"
-    data = {"title": title, "desp": content}
+def get_data_sina_batch(api_codes: List[str]) -> Dict[str, float]:
+    """
+    批量获取新浪财经API数据。
+    
+    Args:
+        api_codes (List[str]): 一组带前缀的股票代码列表。
+        
+    Returns:
+        Dict[str, float]: 字典，键为股票代码（不带前缀），值为当前价。
+    """
+    if not api_codes:
+        return {}
+        
+    codes_str = ",".join(api_codes)
+    url = f"http://hq.sinajs.cn/list={codes_str}"
+    results = {}
+    
+    try:
+        response = requests.get(url, timeout=10)
+        response.encoding = 'gbk'
+        lines = response.text.strip().split(';')
+        
+        for line in lines:
+            if line and "=" in line:
+                match = re.search(r'hq_str_(\w+)="[^,"]+,[^,"]+,[^,"]+,([^,"]+)', line)
+                if match:
+                    # 匹配到的 group(1) 是完整代码，group(2) 是当前价
+                    full_code = match.group(1)
+                    price = float(match.group(2))
+                    results[full_code] = price
+                    
+    except Exception as e:
+        print(f"ERROR: 批量获取新浪API数据失败: {e}")
+        
+    return results
+
+def get_cb_codes_from_eastmoney() -> List[str]:
+    """
+    从东方财富网API动态获取当前所有可转债的股票代码。
+    
+    Returns:
+        List[str]: 可转债API代码列表 (e.g., ["sh110047", "sz128108"])。
+    """
+    url = "http://datacenter-web.eastmoney.com/api/data/v1/get"
+    # 此处的字段和参数经过精简和优化，仅获取代码和市场信息。
+    params = {
+        "reportName": "RPT_BOND_CB_LIST",
+        "columns": "SECURITY_CODE,SNAME",
+        "pageSize": 500, # 确保能获取所有可转债
+        "pageNumber": 1,
+        "sortTypes": "-1",
+        "sortColumns": "TRADE_DATE",
+        "source": "WEB",
+        "client": "WEB",
+    }
+    
+    codes = []
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if data and data['code'] == 0 and data['data']:
+            for item in data['data']['list']:
+                # 市场代码判断：上交所 '1', '5', '6', '9' 开头；深交所 '0', '2', '3' 开头
+                # 转债代码通常是 1 开头 (上交所) 或 12 开头 (深交所)
+                code = item['SECURITY_CODE']
+                if code.startswith('1'):
+                    # 上海转债代码，通常为 sh1xxxxx
+                    codes.append(f"sh{code}")
+                elif code.startswith('12'):
+                    # 深圳转债代码，通常为 sz12xxxx
+                    codes.append(f"sz{code}")
+            
+            print(f"INFO: 成功从东方财富获取 {len(codes)} 个可转债代码。")
+            return codes
+            
+    except Exception as e:
+        print(f"ERROR: 获取可转债代码失败: {e}")
+        
+    return []
+
+def get_cb_avg_price() -> Optional[Dict[str, float]]:
+    """
+    计算所有可转债的算术平均价格。
+    
+    Returns:
+        Optional[Dict[str, float]]: 包含 'current_price' 和 'prev_close' (此处为0) 的字典，
+                                    计算失败则返回 None。
+    """
+    cb_codes = get_cb_codes_from_eastmoney()
+    if not cb_codes:
+        return None
+        
+    # 批量获取价格，返回 {full_code: price} 字典
+    price_map = get_data_sina_batch(cb_codes)
+    
+    valid_prices = []
+    for full_code, price in price_map.items():
+        # 排除价格过高或无法交易的数据（新浪API如果无法获取价格，可能返回0）
+        if 0 < price < MAX_CB_PRICE:
+            valid_prices.append(price)
+
+    if not valid_prices:
+        print("WARN: 未获取到有效的可转债价格数据，无法计算平均价。")
+        return None
+
+    avg_price = sum(valid_prices) / len(valid_prices)
+    
+    print(f"INFO: 基于 {len(valid_prices)} 个可转债，计算平均价为 {avg_price:.4f}")
+    
+    # 可转债平均价没有“昨日收盘价”的概念，设为0.0
+    return {
+        'current_price': avg_price,
+        'prev_close': 0.0
+    }
+
+# --- 🚀 核心抽象函数 ---
+
+def fetch_target_data(config: Dict[str, Any]) -> Optional[Dict[str, float]]:
+    """
+    根据配置的 source_type 字段，获取标的实时数据。
+    
+    Args:
+        config (Dict[str, Any]): 单个标的的统一配置字典。
+        
+    Returns:
+        Optional[Dict[str, float]]: 包含 'current_price' 和 'prev_close' 的字典，
+                                    获取失败则返回 None。
+    """
+    source_type = config['source_type']
+    api_code = config.get('api_code')
+    
+    if source_type == "SINA_API" and api_code:
+        return get_data_sina(api_code)
+        
+    elif source_type == "CB_AVG_PRICE":
+        return get_cb_avg_price()
+        
+    else:
+        print(f"WARN: 未知的或配置不完整的标的类型: {config['code']}")
+        return None
+
+# --- 📢 通知函数 ---
+
+def send_serverchan_notification(title: str, content: str) -> bool:
+    """
+    通过 Server酱 发送通知。
+    
+    Args:
+        title (str): 通知标题。
+        content (str): 通知内容，支持 Markdown。
+        
+    Returns:
+        bool: 发送成功返回 True，否则返回 False。
+    """
+    if not SERVERCHAN_KEY:
+        print("WARN: 环境变量 SERVERCHAN_KEY 未设置，跳过通知发送。")
+        return False
+        
+    url = f"https://sctapi.ftqq.com/{SERVERCHAN_KEY}.send"
+    data = {
+        'title': title,
+        'desp': content # desp字段支持Markdown
+    }
     
     try:
         response = requests.post(url, data=data, timeout=5)
-        response.raise_for_status() 
         result = response.json()
-        
-        if result.get('code') == 0:
-            print("Server酱通知发送成功。")
+        if result['code'] == 0:
+            print(f"INFO: Server酱通知发送成功: {title}")
             return True
         else:
-            print(f"Server酱通知发送失败：{result.get('message')}")
+            print(f"ERROR: Server酱通知发送失败。返回信息: {result.get('message', '未知错误')}")
             return False
-    except requests.exceptions.RequestException as e:
-        print(f"Server酱通知发送失败 (网络错误): {e}")
-        return False
+            
     except Exception as e:
-        print(f"Server酱通知发送失败 (未知错误): {e}")
+        print(f"ERROR: Server酱请求失败: {e}")
         return False
 
+# --- ⚙️ 主逻辑与渲染 ---
 
-# ==================== 采集函数 1：新浪 API (单个证券/外汇) ====================
-# (此函数来自您提供的正常运行的 hs.py 文件，保持不变)
-def get_data_sina(stock_api_code):
+def process_and_render():
     """
-    使用新浪财经API获取指定证券的实时价格，并返回一个包含多项数据的字典。
+    程序主入口：
+    1. 收集所有标的数据。
+    2. 检查并发送通知。
+    3. 生成 HTML 文件。
     """
-    url = f"http://hq.sinajs.cn/list={stock_api_code}"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Referer': 'http://finance.sina.com.cn/'
-    }
+    if not is_trading_day():
+        print("INFO: 当前非工作日，不执行数据采集和通知。")
+        # 即使非交易日，也应该运行一次，确保日志能保存。
+        # pass
+
+    all_results: List[Dict[str, Any]] = []
+    log_updated = False
+    today_date = datetime.now().strftime("%Y-%m-%d")
     
-    try:
-        response = requests.get(url, headers=headers, timeout=10) 
-        response.encoding = 'gbk'
-        data = response.text
-        
-        if response.status_code != 200 or '="' not in data:
-            return {"error": "获取失败", "detail": f"HTTP状态码: {response.status_code}"}
-
-        data_content = data.split('="')[1].strip('";')
-        parts = data_content.split(',')
-        
-        if len(parts) < 4:
-            return {"error": "解析失败", "detail": "数据项不足"}
-            
-        current_price = parts[3]
-        
-        if current_price and current_price.replace('.', '', 1).isdigit():
-            return {
-                "current_price": float(current_price),
-                "open_price": float(parts[1]),
-                "prev_close": float(parts[2]),
-            }
-        else:
-            return {"error": "解析失败", "detail": "价格数据无效"}
-            
-    except requests.exceptions.RequestException as e:
-        return {"error": "网络错误", "detail": str(e)}
-    except Exception as e:
-        return {"error": "未知错误", "detail": str(e)}
-
-
-# ==================== 采集函数 2.1：动态代码获取 (东方财富) ====================
-# (此函数来自您提供的正常运行的 hs.py 文件，保持不变)
-def get_cb_codes_from_eastmoney():
-    """
-    通过爬取东方财富网的公开接口，动态获取所有正在交易中的可转债代码列表。
-    """
-    url = "https://datacenter-web.eastmoney.com/api/data/v1/get?sortColumns=SECURITY_CODE&sortTypes=-1&pageSize=1000&pageNumber=1&reportName=RPT_BOND_CB_LIST&columns=SECURITY_CODE"
+    # 1. 加载通知日志，用于状态持久化
+    notification_log = load_notification_log()
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Referer': 'https://data.eastmoney.com/kzz/default.html'
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
+    # 2. 遍历统一配置列表，获取数据并处理通知
+    for config in ALL_TARGETS_CONFIG:
+        code = config['code']
+        name = config['name']
+        target_price = config['target_price']
         
-        if response.status_code != 200:
-            return [], f"HTTP错误：状态码 {response.status_code}"
-            
-        data = response.json()
+        # 抽象化数据获取
+        data = fetch_target_data(config)
         
-        if data.get('code') != 0:
-            return [], f"东方财富API返回错误：{data.get('message', '未知错误')}"
+        if data:
+            current_price = data['current_price']
+            prev_close = data['prev_close']
             
-        codes_list = []
-        for item in data['result']['data']:
-            code = str(item['SECURITY_CODE'])
-            
-            # 交易所前缀判断：沪市可转债以 11/13/14 开头，深市以 12 开头
-            if code.startswith('11') or code.startswith('13') or code.startswith('14'):
-                sina_code = f"sh{code}"
-            elif code.startswith('12'):
-                sina_code = f"sz{code}"
+            # 计算偏离比例
+            if target_price > 0:
+                # 目标价位>当前价位 触发，计算 (目标价 - 当前价) / 目标价
+                ratio = (target_price - current_price) / target_price
+            elif target_price < 0:
+                # 目标价位<0 (例如，盈利卖出价) 触发，计算 (当前价 - 目标价) / abs(目标价)
+                # 注：此处逻辑需要用户确保 target_price < 0 时，是期望 current_price > target_price 触发
+                ratio = (current_price - target_price) / abs(target_price)
             else:
-                continue
+                # 目标价为0，无意义，不计算
+                ratio = 0.0
+
+            # 检查是否触发通知
+            is_triggered = ratio >= 0 and abs(ratio) <= NOTIFICATION_TOLERANCE
+            is_notified_today = notification_log.get(code) == today_date
+            
+            if is_triggered and not is_notified_today:
+                print(f"ALERT: 标的【{name}】触发目标价位通知！")
                 
-            codes_list.append(sina_code)
+                # --- 📢 通知内容优化 ---
+                title = f"【{name}】已到达目标价位！" 
+                content = (
+                    f"### 🎯 价格监控提醒\n\n"
+                    f"**标的名称：** {name}\n\n"
+                    f"| 指标 | 数值 |\n"
+                    f"| :--- | :--- |\n"
+                    f"| **当前价位** | {current_price:.4f} |\n"
+                    f"| **目标价位** | {target_price:.4f} |\n"
+                    f"| **目标偏离** | {ratio * 100:.4f} % |\n\n"
+                    f"--- \n\n"
+                    f"**策略备注：** {config.get('note', '无')}\n\n"
+                    f"--- \n\n"
+                    f"本次通知已记录（{today_date}），当日不再重复发送。"
+                )
+                
+                send_success = send_serverchan_notification(title, content)
+                
+                # 记录通知日志
+                if send_success:
+                    notification_log[code] = today_date
+                    log_updated = True
             
-        return codes_list, None
-        
-    except requests.exceptions.RequestException as e:
-        return [], f"网络错误：{str(e)}"
-    except json.JSONDecodeError:
-        return [], "数据解析失败：返回内容不是有效的 JSON"
-    except Exception as e:
-        return [], f"未知错误：{str(e)}"
+            # 将结果添加到列表
+            all_results.append({
+                'code': code,
+                'name': name,
+                'current_price': current_price,
+                'prev_close': prev_close,
+                'target_price': target_price,
+                'ratio': ratio,
+                'note': config.get('note', ''),
+                'is_notified_today': is_notified_today
+            })
 
-
-# ==================== 采集函数 2.2：计算平均价格 (包含剔除逻辑) ====================
-# (此函数来自您提供的正常运行的 hs.py 文件，保持不变)
-def get_cb_avg_price_from_list(codes_list):
-    """
-    通过新浪 API 批量获取指定可转债列表的价格，并计算有效价格的平均值。
-    剔除价格 >= MAX_CB_PRICE 的标的。
-    """
-    if not codes_list:
-        return {"error": "计算失败", "detail": "可转债代码列表为空，无法进行计算。"}
-
-    query_string = ",".join(codes_list)
-    url = f"http://hq.sinajs.cn/list={query_string}" 
-    
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Referer': 'http://finance.sina.com.cn/' 
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        response.encoding = 'gbk'
-        data = response.text
+    # 3. 如果日志有更新（即成功发送了通知），则保存文件
+    if log_updated:
+        save_notification_log(notification_log)
         
-        if response.status_code != 200 or not data.strip():
-            return {"error": "获取失败", "detail": f"新浪API状态码: {response.status_code}"}
-        
-        valid_lines = [line for line in data.split('\n') if line.startswith('var hq_str_')]
-        
-        prices = []
-        
-        for line in valid_lines:
-            match = re.search(r'="(.+?)"', line)
-            if match:
-                parts = match.group(1).split(',')
-                # 可转债的实时价格位于第4个位置 (parts[3])
-                if len(parts) > 3:
-                    price_str = parts[3] 
-                    
-                    if price_str and price_str.replace('.', '', 1).isdigit():
-                        price_float = float(price_str)
-                        
-                        # 剔除逻辑：只纳入价格大于0且低于 MAX_CB_PRICE 的标的进行计算
-                        if price_float > 0 and price_float < MAX_CB_PRICE:
-                            prices.append(price_float)
-        
-        if not prices:
-            return {"error": "计算失败", "detail": f"已获取 {len(codes_list)} 个代码，但新浪未返回有效或低于 {MAX_CB_PRICE:.2f} 的价格数据。"}
-
-        avg_price = sum(prices) / len(prices)
-        
-        return {
-            "current_price": avg_price,
-            "open_price": None, 
-            "prev_close": None, 
-            "count": len(prices) # 实际用于计算的有效数量
-        }
-            
-    except requests.exceptions.RequestException as e:
-        return {"error": "网络错误", "detail": str(e)}
-    except Exception as e:
-        return {"error": "未知错误", "detail": f"数据处理异常: {str(e)}"}
-
-
-# ==================== 辅助函数 (新增) ====================
-def is_trading_time():
-    """
-    判断当前时间是否处于中国证券市场的正常交易时段 (北京时间)。
-    不考虑法定节假日，只判断周一至周五 9:30-11:30 和 13:00-15:00。
-    """
-    now = datetime.now()
-    hour = now.hour
-    minute = now.minute
-    weekday = now.weekday() # Monday is 0 and Sunday is 6
-    
-    # 1. 判断是否为工作日 (周一到周五)
-    if weekday >= 5: # 5: Saturday, 6: Sunday
-        return False
-        
-    # 2. 判断是否处于交易时段
-    
-    # 上午: 9:30 - 11:30
-    am_start = 9 * 60 + 30
-    am_end = 11 * 60 + 30
-    
-    # 下午: 13:00 - 15:00
-    pm_start = 13 * 60 + 0
-    pm_end = 15 * 60 + 0
-    
-    current_minutes = hour * 60 + minute
-    
-    if (current_minutes >= am_start and current_minutes <= am_end) or \
-       (current_minutes >= pm_start and current_minutes <= pm_end):
-        return True
-        
-    return False
-
-# ==================== HTML 生成函数 (包含目标比例列和备注) ====================
-# (此函数来自您提供的正常运行的 hs.py 文件，已根据要求修改)
-def create_html_content(stock_data_list):
-    """
-    生成带有价格表格、目标比例和自动刷新功能的HTML内容。
-    【修改】：增加 '备注' 列。
-    【新增】：根据交易时间判断状态，并添加到时间戳后面。
-    """
-    global MAX_CB_PRICE
-    global REFRESH_INTERVAL
-    
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S (北京时间)')
-    table_rows = []
-    
-    # 【新增】判断交易时间状态
-    if is_trading_time():
-        status_text = '<span style="color: #27ae60;">正常运行</span>' # 绿色
+    # 4. 生成 HTML 报告
+    if all_results:
+        # 按偏离比例升序排列，目标偏离越小的越靠前 (即越接近目标价)
+        sorted_results = sorted(all_results, key=itemgetter('ratio'))
+        generate_html_report(sorted_results)
     else:
-        status_text = '非交易时间' # 保持默认颜色（灰色）
-        
-    # 【新增】将状态文本添加到时间戳后面
-    timestamp_with_status = f"{timestamp} | {status_text}"
+        print("WARN: 未获取到任何有效数据，跳过 HTML 报告生成。")
+
+
+def generate_html_report(results: List[Dict[str, Any]]):
+    """
+    根据数据结果生成自刷新 HTML 报告文件。
     
-    # 【修改】：增加 '备注' 这一列
-    table_rows.append("""
-        <tr>
-            <th>标的名称</th>
-            <th>证券代码</th>
-            <th>目标价位</th>
-            <th>当前价位</th>
-            <th>目标比例</th> 
-            <th>备注</th>
-        </tr>
-    """)
+    Args:
+        results (List[Dict[str, Any]]): 待展示的标的数据列表。
+    """
+    current_time = datetime.now().strftime("%Y年%m月%d日 %H:%M:%S")
     
-    for data in stock_data_list:
-        
-        price_color = '#27ae60' 
-        ratio_color = '#7f8c8d'
-        target_display = f"{data['target_price']:.2f}"
-        price_display = "N/A"
-        ratio_display = "N/A"
-        note_display = data.get('note', '') # 获取备注信息
-        
-        if data['is_error']:
-            # 错误信息显示为红色
-            price_display = f"数据错误: {data.get('detail', '未知错误')}"
-            price_color = '#e74c3c'
-        else:
-            # 1. 价格格式化
-            if data['code'] == 'USD/CNY':
-                price_display = f"{data['current_price']:.4f}"
-            elif data['code'] == 'CB/AVG':
-                price_display = f"{data['current_price']:.3f}"
-            else:
-                price_display = f"{data['current_price']:.3f}"
-                
-            # 2. 当前价位颜色判断 (高于目标价时标橙色)
-            if data['current_price'] >= data['target_price']:
-                price_color = '#e67e22' # 橙色
-            else:
-                price_color = '#27ae60' # 绿色
-
-            # 3. 目标比例显示和颜色判断
-            if data.get('target_ratio') is not None:
-                ratio_value = data['target_ratio']
-                ratio_display = f"{ratio_value * 100:.2f}%"
-                
-                # 目标比例颜色：负数（低于目标价）绿色；正数（高于目标价）橙色
-                if ratio_value < 0:
-                    ratio_color = '#27ae60' 
-                elif ratio_value > 0:
-                    ratio_color = '#e67e22'
-                else:
-                    ratio_color = '#3498db'
-            
-        # 生成表格行
-        row = f"""
-        <tr>
-            <td>{data['name']}</td>
-            <td>{data['code']}</td>
-            <td>{target_display}</td>
-            <td style="color: {price_color}; font-weight: bold;">{price_display}</td>
-            <td style="color: {ratio_color}; font-weight: bold;">{ratio_display}</td>
-            <td style="text-align: left;">{note_display}</td>
-        </tr>
-        """
-        table_rows.append(row)
-
-    table_content = "".join(table_rows)
-
-    # --- 2. 完整的 HTML 模板 ---
-    # 【修改】：在 .timestamp div 中使用新的 timestamp_with_status 变量
-    html_template = f"""
-<!DOCTYPE html>
-<html lang="zh">
+    # HTML 内容拼接
+    html_content = f"""<!DOCTYPE html>
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="refresh" content="{REFRESH_INTERVAL}">
-    <title>数据展示</title>
-    <meta name="robots" content="noindex, nofollow">
+    <title>价格监控报告 - {current_time}</title>
     <style>
-        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; margin-top: 50px; background-color: #f4f4f9; }}
-        h1 {{ color: #2c3e50; font-size: 2.5em; }}
-        table {{ 
-            width: 95%; /* 增加表格宽度以容纳备注 */
-            margin: 30px auto; 
-            border-collapse: collapse; 
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-            background-color: white;
-        }}
-        th, td {{ 
-            border: 1px solid #ddd; 
-            padding: 15px; 
-            text-align: center;
-            font-size: 1.0em;
-        }}
-        th:last-child, td:last-child {{
-            text-align: left; /* 备注列左对齐 */
-        }}
-        th {{ 
-            background-color: #3498db; 
-            color: white; 
-            font-weight: bold; 
-        }}
-        tr:nth-child(even) {{ background-color: #f2f2f2; }}
-        .timestamp {{ color: #7f8c8d; margin-top: 30px; font-size: 1.2em; }}
-        .note p {{ color: #34495e; margin: 5px 0; font-size: 1em;}}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 20px; background-color: #f4f7f6; color: #333; }}
+        .container {{ max-width: 1000px; margin: 0 auto; background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); }}
+        h1 {{ color: #1e88e5; border-bottom: 2px solid #eee; padding-bottom: 10px; }}
+        .update-time {{ color: #777; font-size: 0.9em; margin-bottom: 20px; display: block; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+        th, td {{ padding: 12px 15px; text-align: left; border-bottom: 1px solid #ddd; }}
+        th {{ background-color: #e3f2fd; color: #1e88e5; font-weight: 600; }}
+        tr:hover {{ background-color: #f1f8e9; }}
+        .note {{ font-size: 0.8em; color: #666; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+        .price-up {{ color: #e53935; font-weight: bold; }}
+        .price-down {{ color: #43a047; font-weight: bold; }}
+        .price-flat {{ color: #555; }}
+        .ratio-alert {{ background-color: #fffde7; font-weight: bold; }}
+        .ratio-ok {{ background-color: #e8f5e9; }}
+        .ratio-near {{ background-color: #fff3e0; }}
+        .ratio-far {{ background-color: #f3f3f3; }}
     </style>
 </head>
 <body>
-    <h1>数据展示 (按目标比例排序)</h1>
+    <div class="container">
+        <h1>📊 价格监控实时报告</h1>
+        <span class="update-time">更新时间：{current_time} | 下次刷新: {REFRESH_INTERVAL}秒后</span>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th>名称 (代码)</th>
+                    <th>当前价</th>
+                    <th>今日涨跌幅</th>
+                    <th>目标价</th>
+                    <th>目标偏离 (绝对值)</th>
+                    <th>备注</th>
+                </tr>
+            </thead>
+            <tbody>
+"""
     
-    <table>
-        {table_content}
-    </table>
+    for item in results:
+        # 计算涨跌幅
+        if item['prev_close'] > 0:
+            change_percent = (item['current_price'] - item['prev_close']) / item['prev_close'] * 100
+            change_class = "price-up" if change_percent > 0 else ("price-down" if change_percent < 0 else "price-flat")
+            change_text = f"{change_percent:.2f}%"
+        else:
+            # 对于可转债平均价等无昨日收盘价的，显示N/A
+            change_class = "price-flat"
+            change_text = "N/A"
 
-    <div class="timestamp">数据更新时间: {timestamp_with_status}</div>
-    <div class="note">
-        <p>📌 **代码运行时间说明**：本代码由 GitHub Actions 在**交易日**的**运行。</p>
-        <p>📌 **可转债均价计算说明**：均价计算已**剔除**价格大于或等于 {MAX_CB_PRICE:.2f} 的标的。（相当于暂停该功能）</p>
-        <p>注意：本页面每 {REFRESH_INTERVAL // 60} 分钟自动重新加载，以获取最新数据。</p>
+        # 根据偏离度设置背景色
+        abs_ratio = abs(item['ratio'])
+        if abs_ratio <= NOTIFICATION_TOLERANCE * 5: # 极度接近/触发
+             ratio_class = "ratio-alert" 
+        elif abs_ratio < 0.01: # 1%以内
+             ratio_class = "ratio-near" 
+        elif abs_ratio < 0.05: # 5%以内
+             ratio_class = "ratio-ok"
+        else:
+             ratio_class = "ratio-far"
+             
+        # 格式化目标偏离度
+        ratio_display = f"{abs_ratio * 100:.4f}%"
+        
+        # 目标价位是否触发（辅助提醒）
+        triggered_icon = "⭐" if item['is_notified_today'] else ""
+        
+        html_content += f"""
+                <tr>
+                    <td>{item['name']} ({item['code']})</td>
+                    <td>{item['current_price']:.4f} {triggered_icon}</td>
+                    <td class="{change_class}">{change_text}</td>
+                    <td>{item['target_price']:.4f}</td>
+                    <td class="{ratio_class}">{ratio_display}</td>
+                    <td class="note" title="{item['note']}">{item['note']}</td>
+                </tr>
+"""
+
+    html_content += """
+            </tbody>
+        </table>
+        
+        <p class="update-time" style="margin-top: 30px;">
+            **数据来源:** 新浪财经 / 东方财富网 (可转债) | 
+            **通知状态:** ⭐ 表示当日已发送通知 (记录在 notification_log.json)。
+        </p>
     </div>
 </body>
 </html>
 """
-    return html_template
 
-# --- 主逻辑 ---
-if __name__ == "__main__":
-    
-    all_stock_data = []
-    
-    # ================= 运行模块 1：新浪 API (指数/外汇) =================
-    for api_code, config in TARGET_STOCKS.items():
-        api_data = get_data_sina(api_code)
-        
-        # 【新增】：从集中配置中获取目标价和备注
-        target_code = config["code"]
-        target_price = TARGET_PRICES.get(target_code, 0.0) 
-        target_note = TARGET_NOTES.get(target_code, "") 
-        
-        final_data = {
-            "name": config["name"],
-            "code": target_code,
-            "target_price": target_price, 
-            "note": target_note,         
-            "is_error": "error" in api_data,
-            "current_price": api_data.get("current_price"),
-            **api_data
-        }
-        all_stock_data.append(final_data)
-        
-    # ================= 运行模块 2：可转债平均价格计算 (动态列表) =================
-    codes_list, error_msg = get_cb_codes_from_eastmoney() # (使用您提供的“正常运行”的函数)
-    
-    config = CALCULATED_TARGETS['cb_avg_price']
-    target_code = config["code"] 
-    
-    if error_msg:
-        api_data = {"error": "代码列表获取失败", "detail": error_msg}
-    else:
-        api_data = get_cb_avg_price_from_list(codes_list)
-    
-    target_price = TARGET_PRICES.get(target_code, 0.0)
-    target_note = TARGET_NOTES.get(target_code, "")
-    
-    final_data = {
-        "name": config["name"],
-        "code": target_code,
-        "target_price": target_price, 
-        "note": target_note,         
-        "is_error": "error" in api_data,
-        "current_price": api_data.get("current_price"),
-        **api_data
-    }
-    
-    if 'count' in api_data and not final_data['is_error']:
-        final_data['name'] = f"可转债平均价格 (基于{api_data['count']}个代码计算)"
-    else:
-        final_data['name'] = config['name'] 
-        
-    all_stock_data.append(final_data)
-        
-    # ================= 运行模块 3：计算目标比例并排序 =================
-    
-    # 1. 计算目标比例 (Target Ratio): (当前价位 - 目标价位) / 当前价位
-    for item in all_stock_data:
-        item['target_ratio'] = None 
-        
-        if not item['is_error'] and item['current_price'] is not None and item['current_price'] != 0:
-            current_price = item['current_price']
-            target_price = item['target_price']
-            
-            # 计算目标比例
-            item['target_ratio'] = (current_price - target_price) / current_price
-        
-    # 2. 按目标比例升序排序 (从低到高)
-    all_stock_data.sort(key=lambda x: x['target_ratio'] if x['target_ratio'] is not None else float('inf'))
-
-
-    # ================= 运行模块 4：目标价位通知 (新增) =================
-    
-    print("--- 正在检查目标价位通知 ---")
-    
-    today_date = datetime.now().strftime('%Y-%m-%d')
-    notification_log = load_notification_log() # 加载历史日志
-    log_updated = False # 标记日志文件是否需要保存
-
-    for item in all_stock_data:
-        code = item.get('code')
-        name = item.get('name')
-        ratio = item.get('target_ratio')
-        
-        # 仅对有效数据进行判断
-        if item['is_error'] or ratio is None:
-            continue
-            
-        # 触发条件：偏离目标比例在容忍度范围内 (即现价约等于目标价)
-        is_triggered = abs(ratio) <= NOTIFICATION_TOLERANCE
-        # 防重发判断：检查今天是否已经发送过
-        is_notified_today = notification_log.get(code) == today_date
-
-        if is_triggered and not is_notified_today:
-            
-            # 【您的要求】：新标题格式
-            title = f"【{name}】到达目标价位！！！" 
-            
-            # 【您的要求】：新内容格式 - 使用 Markdown 表格
-            content = (
-                f"### 🎯 价格监控提醒\n\n"
-                f"**标的名称：** {name}\n\n"
-                f"| 指标 | 数值 |\n"
-                f"| :--- | :--- |\n"
-                f"| **当前价位** | {item['current_price']:.4f} |\n"
-                f"| **目标价位** | {item['target_price']:.4f} |\n"
-                f"| **偏离比例** | {ratio * 100:.4f} % |\n\n"
-                f"--- \n\n"
-                f"**策略备注：** {item.get('note', '无')}\n\n"
-                f"--- \n\n"
-                f"本次通知已记录（{today_date}），当日不再重复发送。"
-            )
-            
-            send_success = send_serverchan_notification(title, content)
-            
-            # 记录通知日志
-            if send_success:
-                notification_log[code] = today_date
-                log_updated = True
-    
-    # 如果日志有更新（即成功发送了通知），则保存文件
-    if log_updated:
-        save_notification_log(notification_log)
-
-
-    # ================= 运行模块 5：生成 HTML 文件 =================
-    
-    # 3. 生成 HTML 内容
-    html_content = create_html_content(all_stock_data)
-
-    # 4. 写入文件
     try:
         with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
             f.write(html_content)
-        print(f"成功更新文件: {OUTPUT_FILE}，包含 {len(all_stock_data)} 个证券/指数数据。")
+        print(f"INFO: 成功生成 HTML 报告: {OUTPUT_FILE}")
     except Exception as e:
-        print(f"写入文件失败: {e}")
+        print(f"ERROR: HTML 报告生成失败: {e}")
 
+if __name__ == '__main__':
+    # 在实际运行时，可以在主函数外执行，以确保日志文件被正确加载和保存。
+    # process_and_render()
+    # 增加一个简单的执行判断，确保在无 SERVERCHAN_KEY 时可以进行页面生成。
+    if not SERVERCHAN_KEY:
+        print("WARN: SERVERCHAN_KEY 环境变量缺失，将仅运行数据采集和页面生成，跳过通知检查。")
+        
+    process_and_render()
