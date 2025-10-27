@@ -14,7 +14,7 @@ TARGET_STOCKS = {
     "sz399975": {
         "name": "证券公司指数",
         "code": "399975",
-        "target_price": 1200.00  # 您的预设目标价
+        "target_price": 700.00  # 您的预设目标价
     }
     # 示例：如果您要增加沪深300指数：
     # "sh000300": {
@@ -207,3 +207,4 @@ if __name__ == "__main__":
         print(f"成功更新文件: {OUTPUT_FILE}，包含 {len(all_stock_data)} 个证券数据。")
     except Exception as e:
         print(f"写入文件失败: {e}")
+
