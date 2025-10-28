@@ -9,7 +9,7 @@ import calendar # 用于辅助判断周末/交易日
 
 # --- 全局配置 ---
 OUTPUT_FILE = "index_price.html"  # 最终生成的 HTML 报告文件名。
-REFRESH_INTERVAL = 1800  # HTML 页面自动刷新间隔（秒），即 30 分钟
+REFRESH_INTERVAL = 180  # HTML 页面自动刷新间隔（秒），即 30 分钟
 MAX_CB_PRICE = 9999.00 # 可转债平均价计算时，剔除高于或等于此价格的标的
 
 # ======================= 通知配置区域 =======================
@@ -494,6 +494,7 @@ if __name__ == "__main__":
         print(f"成功更新文件: {OUTPUT_FILE}，包含 {len(all_stock_data)} 个证券/指数数据。")
     except Exception as e:
         print(f"写入文件失败: {e}")
+
 
 
 
