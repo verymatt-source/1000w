@@ -13,7 +13,7 @@ REFRESH_INTERVAL = 300  # HTML 页面自动刷新间隔（秒），即 5 分钟
 MAX_CB_PRICE = 1000.00 # 可转债平均价计算时，剔除高于或等于此价格的标的
 
 # ======================= 通知配置区域 =======================
-NOTIFICATION_TOLERANCE = 0.0005  # 触发通知的目标比例（Target Ratio）容忍度（绝对值）
+NOTIFICATION_TOLERANCE = 0.005  # 触发通知的目标比例（Target Ratio）容忍度（绝对值）
 NOTIFICATION_LOG_FILE = "notification_log.json"  # 记录已发送通知历史的文件路径
 # =====================================================================
 
@@ -444,7 +444,13 @@ if __name__ == "__main__":
     today_date = datetime.now().strftime('%Y-%m-%d')
     notification_log = load_notification_log() # 加载历史通知记录
     log_updated = False 
-
+    
+    # =========================================================
+    # === 【临时测试代码】验证 notification_log.json 保存功能 ===
+    notification_log['TEST_LOG_VALIDATION'] = today_date # 强制添加一个测试记录
+    log_updated = True                           # 强制设置更新标志为 True
+    # =========================================================
+    
     for item in all_stock_data:
         code = item.get('code')
         name = item.get('name')
@@ -494,5 +500,6 @@ if __name__ == "__main__":
         print(f"成功更新文件: {OUTPUT_FILE}，包含 {len(all_stock_data)} 个证券/指数数据。")
     except Exception as e:
         print(f"写入文件失败: {e}")
+
 
 
