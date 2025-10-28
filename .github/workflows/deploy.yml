@@ -1,27 +1,81 @@
 # .github/workflows/deploy.yml
 # ------------------------------------------------------------
-# 1. 极简基础配置
+# 1. 基础信息配置
 # ------------------------------------------------------------
-name: 最小定时触发测试
+name: 证券价格定时更新与部署
 
 # ------------------------------------------------------------
-# 2. 触发器配置 (关键：每 5 分钟运行一次)
+# 2. 触发器配置 (何时运行)
 # ------------------------------------------------------------
 on:
+  # 定时触发器 (Schedule Trigger)
   schedule:
-    # 极简测试：每 5 分钟运行一次 (UTC时间)
+    # 运行时间: 全天 24 小时，每 5 分钟运行一次。
     - cron: '*/5 * * * *'
   
-  # 保留手动触发，以防万一需要手动激活调度器
+  # 手动触发器 (Manual Trigger)
   workflow_dispatch:
 
 # ------------------------------------------------------------
-# 3. 任务配置 (仅一个简单的 echo 命令)
+# 3. 权限配置 (Permissions)
+# 【关键】部署到 GitHub Pages 必须授予这些权限
+# ------------------------------------------------------------
+permissions:
+  pages: write        # 用于 Pages 部署
+  id-token: write     # 用于 Pages 部署认证
+
+# ------------------------------------------------------------
+# 4. 任务 (Jobs) 配置
 # ------------------------------------------------------------
 jobs:
-  test_trigger:
+  run_and_build:
     runs-on: ubuntu-latest
     
+    # 设置环境变量 (Environment Variable)
+    env:
+      TZ: 'Asia/Shanghai' # 设置时区，确保日志时间正确
+    
     steps:
-      - name: 检查定时器是否工作
-        run: echo "定时任务成功触发于 $(date)!"
+      # 1. 检出代码 (Checkout)
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+
+      # 2. 设置 Python 环境
+      - name: 设置 Python 3.11 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11' 
+
+      # 3. 安装依赖
+      - name: 安装 Python 依赖 (requests)
+        run: pip install requests
+        
+      # 4. 运行脚本并构建站点目录
+      - name: 运行价格脚本并构建 _site 目录
+        run: |
+          mkdir _site
+          python -u hs.py
+          mv index_price.html _site/index.html 
+          
+      # 5. 配置和上传待部署的文件
+      - name: 配置 GitHub Pages 部署
+        uses: actions/configure-pages@v5
+
+      - name: 上传待部署的文件 (Pages Artifact)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '_site'
+          
+  # ------------------------------------------------------------
+  # 5. 部署到 GitHub Pages (Deployment)
+  # ------------------------------------------------------------
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: run_and_build 
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
