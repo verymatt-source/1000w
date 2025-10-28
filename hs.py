@@ -374,7 +374,7 @@ def create_html_content(stock_data_list):
             <tr>
                 <td><strong>2020年2月3日</strong></td>
                 <td>-7.72%</td>
-                <td>新冠疫情暴发，武汉封城，多个城市经济活动暂停，市场对经济前景陷入极度恐慌。当日为春节后首个交易日。</td>
+                <td>疫情暴发市场对经济前景陷入极度恐慌。当日为春节后首个交易日。</td>
                 <td>沪指重挫，两市超3000只个股跌停。但央行迅速释放流动性，市场随后快速反弹，创业板指年内涨幅超60%。</td>
             </tr>
             <tr>
@@ -597,6 +597,7 @@ if __name__ == "__main__":
         print(f"成功更新文件: {OUTPUT_FILE}，包含 {len(all_stock_data)} 个证券/指数数据。")
     except Exception as e:
         print(f"写入文件失败: {e}")
+
 
 
 
