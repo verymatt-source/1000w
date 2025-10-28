@@ -64,7 +64,19 @@ jobs:
       - name: 安装 Python 依赖 (requests)
         run: pip install requests
         
-      # 4. 运行脚本并构建站点目录
+      # 【新增】4. 缓存通知日志文件 (实现防重发机制的文件持久化)
+      - name: Cache Notification Log (Restore/Save)
+        uses: actions/cache@v4
+        with:
+          # 缓存文件路径：脚本期望在根目录读取和写入
+          path: notification_log.json
+          # 缓存键：使用 os 和脚本文件哈希，确保在脚本逻辑变更后重新开始计数
+          key: ${{ runner.os }}-notification-log-${{ hashFiles('hs.py') }}
+          # 恢复键：如果精确键不匹配，尝试恢复上一次的日志
+          restore-keys: |
+            ${{ runner.os }}-notification-log-
+
+      # 5. 运行脚本并构建站点目录
       - name: 运行价格脚本并构建 _site 目录
         run: |
           # 1. 创建 Pages 标准的输出目录 _site
@@ -73,12 +85,13 @@ jobs:
           python -u hs.py
           # 3. 移动并重命名文件。
           mv index_price.html _site/index.html 
-          # 4. 【关键】：将日志文件也移动到 _site 目录，以便 Actions 上传并持久化
+          # 4. 【关键修正】：将日志文件复制（cp）到 _site 目录。
+          #    必须使用 cp 而非 mv，以保留根目录的日志文件供上一步的 Cache Action 自动保存。
           if [ -f notification_log.json ]; then
-            mv notification_log.json _site/
+            cp notification_log.json _site/ # 已修正为 cp
           fi
           
-      # 5. 🛠 调试步骤：检查 _site 目录内容
+      # 6. 🛠 调试步骤：检查 _site 目录内容
       - name: 检查 _site 目录内容
         run: ls -R _site/
         
@@ -96,7 +109,7 @@ jobs:
       # ------------------------------------------------------------
 
   # ------------------------------------------------------------
-  # 6. 部署到 GitHub Pages (Deployment)
+  # 7. 部署到 GitHub Pages (Deployment)
   # ------------------------------------------------------------
   deploy:
     environment:
