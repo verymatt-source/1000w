@@ -1,111 +1,27 @@
 # .github/workflows/deploy.yml
 # ------------------------------------------------------------
-# 1. 基础信息配置
+# 1. 极简基础配置
 # ------------------------------------------------------------
-name: 证券公司价格定时更新与部署
+name: 最小定时触发测试
 
 # ------------------------------------------------------------
-# 2. 触发器配置 (何时运行)
+# 2. 触发器配置 (关键：每 5 分钟运行一次)
 # ------------------------------------------------------------
 on:
-  # 定时触发器 (Schedule Trigger)
   schedule:
-    # 【高频测试】改为每 5 分钟运行一次（UTC时间）
-    # 分钟(*/5) 小时(*) 日期(*) 月份(*) 星期(*)
+    # 极简测试：每 5 分钟运行一次 (UTC时间)
     - cron: '*/5 * * * *'
   
-  # 手动触发器 (Manual Trigger)
+  # 保留手动触发，以防万一需要手动激活调度器
   workflow_dispatch:
 
 # ------------------------------------------------------------
-# 3. 并发控制 (Concurrency)
-# ------------------------------------------------------------
-concurrency:
-  cancel-in-progress: true
-  group: ${{ github.workflow }}-${{ github.ref }}
-
-# ------------------------------------------------------------
-# 4. 权限配置 (Permissions)
-# 【关键】部署到 GitHub Pages 必须授予这些权限
-# contents: write 用于将更新后的 notification_log.json 提交回 Pages 分支。
-# pages 和 id-token 用于 Pages 部署认证。
-# ------------------------------------------------------------
-permissions:
-  contents: write     
-  pages: write       
-  id-token: write    
-
-# ------------------------------------------------------------
-# 5. 任务 (Jobs) 配置
+# 3. 任务配置 (仅一个简单的 echo 命令)
 # ------------------------------------------------------------
 jobs:
-  run_and_build:
+  test_trigger:
     runs-on: ubuntu-latest
     
-    # 设置环境变量 (Environment Variable)
-    env:
-      TZ: 'Asia/Shanghai' 
-      # 【✅ 关键修正：添加此行，注入 Server酱 Secret Key ✅】
-      # 变量名 SERVERCHAN_SCKEY 必须与 hs.py 中读取的变量名完全一致。
-      SERVERCHAN_SCKEY: ${{ secrets.SERVERCHAN_SCKEY }} 
-    
     steps:
-      # 1. 检出代码 (Checkout)
-      - name: 检出仓库代码
-        uses: actions/checkout@v4
-
-      # 2. 设置 Python 环境
-      - name: 设置 Python 3.11 环境
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11' 
-
-      # 3. 安装依赖
-      - name: 安装 Python 依赖 (requests)
-        run: pip install requests
-        
-      # 4. 运行脚本并构建站点目录
-      - name: 运行价格脚本并构建 _site 目录
-        run: |
-          # 1. 创建 Pages 标准的输出目录 _site
-          mkdir _site
-          # 2. 运行 Python 脚本。脚本运行时会读/写 notification_log.json
-          python -u hs.py
-          # 3. 移动并重命名文件。
-          mv index_price.html _site/index.html 
-          # 4. 【关键】：将日志文件也移动到 _site 目录，以便 Actions 上传并持久化
-          if [ -f notification_log.json ]; then
-            mv notification_log.json _site/
-          fi
-          
-      # 5. 🛠 调试步骤：检查 _site 目录内容
-      - name: 检查 _site 目录内容
-        run: ls -R _site/
-        
-      # ------------------------------------------------------------
-      # 【部署修复】上传部署文件 (Artifacts)，解决 "No artifacts named..." 错误
-      # ------------------------------------------------------------
-      - name: 配置 GitHub Pages 部署
-        uses: actions/configure-pages@v5
-
-      - name: 上传待部署的文件 (Pages Artifact)
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: '_site' # 上传 _site 目录下的所有内容
-          
-      # ------------------------------------------------------------
-
-  # ------------------------------------------------------------
-  # 6. 部署到 GitHub Pages (Deployment)
-  # ------------------------------------------------------------
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    # 部署任务依赖于 run_and_build 任务
-    needs: run_and_build 
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: 检查定时器是否工作
+        run: echo "定时任务成功触发于 $(date)!"
