@@ -249,7 +249,7 @@ def is_trading_time():
 
 # ==================== HTML 生成函数 ====================
 def create_html_content(stock_data_list):
-    """生成包含价格表格、目标比例和自动刷新设置的 HTML 页面内容。"""
+    """生成包含价格表格、目标比例、历史数据和自动刷新设置的 HTML 页面内容。"""
     global MAX_CB_PRICE
     global REFRESH_INTERVAL
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S (北京时间)')
@@ -311,6 +311,93 @@ def create_html_content(stock_data_list):
         """
         table_rows.append(row)
     table_content = "".join(table_rows)
+
+    # --- 新增的历史数据 HTML 块（直接定义在函数内部） ---
+    historical_data_html = """
+    <div class="historical-section">
+        <h2>📊 附：上证指数5%以上跌幅记录</h2>
+        <table class="historical-table">
+            <tr>
+                <th>日期</th>
+                <th>上证指数跌幅</th>
+                <th>主要背景与原因</th>
+                <th>市场表现与后续影响</th>
+            </tr>
+            <tr>
+                <td><strong>1996年12月16日</strong></td>
+                <td>-9.91%</td>
+                <td>1996年股市经历疯狂上涨，沪指一年内涨幅达140%。《人民日报》发表特约评论员文章《正确认识当前股票市场》，批评股市“非理性暴涨”，引发恐慌性抛售。</td>
+                <td>沪指连续两日暴跌近20%，两市绝大多数股票跌停。此次暴跌后，市场进入调整期。</td>
+            </tr>
+            <tr>
+                <td><strong>2007年2月27日</strong></td>
+                <td>-8.84%</td>
+                <td>2006-2007年A股处于大牛市，市场积累较大泡沫。触发因素包括市场传闻加征资本利得税、IPO加速（如中国平安上市）等，引发恐慌性抛售。</td>
+                <td>此次暴跌引发了全球市场联动下跌，美股道琼斯指数在次日也跌超3%。</td>
+            </tr>
+            <tr>
+                <td><strong>2007年5月30日</strong></td>
+                <td>-6.50%</td>
+                <td>财政部宣布上调证券交易印花税，从1‰上调至3‰，直接打击市场情绪，特别是对当时炒作火热的中小盘股形成精准打击。</td>
+                <td>中小盘股连续跌停，一周内沪指跌近千点，被称为“5.30股灾”。但此次调整只是大牛市中的插曲，其后市场转向蓝筹股行情，并最终涨至6124点历史高点。</td>
+            </tr>
+            <tr>
+                <td><strong>2008年6月10日</strong></td>
+                <td>-7.73%</td>
+                <td>全球金融危机蔓延，国内通胀高企，央行加息预期升温。此次暴跌发生在沪指从6124点历史高位回落的熊市过程中。</td>
+                <td>沪指单日失守3000点，是2008年大熊市中的一次急跌。全年沪指从高点下跌超70%。</td>
+            </tr>
+            <tr>
+                <td><strong>2015年1月19日</strong></td>
+                <td>-7.70%</td>
+                <td>监管层出手规范券商融资融券（两融）业务，引发杠杆资金平仓潮。</td>
+                <td>券商股集体跌停，两市市值单日蒸发约3万亿元，被称为“119股灾”。</td>
+            </tr>
+            <tr>
+                <td><strong>2015年6月19日</strong></td>
+                <td>-6.42%</td>
+                <td>A股在创下5178点新高后进入去杠杆周期，高杠杆融资盘恐慌性抛售。此前热门股“中国中车”崩盘成为压垮市场的导火索之一。</td>
+                <td>此次暴跌开启了2015年下半年的股灾，沪指一周内多次跌幅超6%，近1100只股票跌停。</td>
+            </tr>
+            <tr>
+                <td><strong>2016年1月4日</strong></td>
+                <td>-6.86%</td>
+                <td>当天是熔断机制正式实施的首个交易日。机制设计本身放大了市场恐慌情绪，导致流动性枯竭。</td>
+                <td>沪深300指数暴跌并触发熔断机制，导致提前收盘。该机制在实施四天后被紧急叫停，成为A股“最短命”政策之一。</td>
+            </tr>
+            <tr>
+                <td><strong>2019年5月6日</strong></td>
+                <td>-5.58%</td>
+                <td>中美贸易摩擦升级，美国宣布对2000亿美元中国商品加征关税。五一长假后首个交易日，市场以暴跌回应。</td>
+                <td>沪指跌破2900点，创业板指跌幅近8%。</td>
+            </tr>
+            <tr>
+                <td><strong>2020年2月3日</strong></td>
+                <td>-7.72%</td>
+                <td>新冠疫情暴发，武汉封城，多个城市经济活动暂停，市场对经济前景陷入极度恐慌。当日为春节后首个交易日。</td>
+                <td>沪指重挫，两市超3000只个股跌停。但央行迅速释放流动性，市场随后快速反弹，创业板指年内涨幅超60%。</td>
+            </tr>
+            <tr>
+                <td><strong>2022年4月25日</strong></td>
+                <td>-5.13%</td>
+                <td>多重利空叠加：美联储加息预期升温、俄乌冲突持续、国内疫情反复引发供应链中断担忧。外围市场前一日暴跌也加剧了恐慌。</td>
+                <td>沪指跌破3000点关键心理关口，触发程序化交易止损盘，加剧抛售。两市近4600只个股下跌。</td>
+            </tr>
+            <tr>
+                <td><strong>2025年4月7日</strong></td>
+                <td>-7.34%</td>
+                <td>美国宣布对全球加征“对等关税”，引发全球经济衰退担忧。此事件为搜索结果中提及的最新一次重大暴跌。</td>
+                <td>根据资料显示，沪指单日蒸发数万亿市值，科技与出口板块遭重创，创业板指单日重挫12.5%。</td>
+            </tr>
+        </table>
+        
+        <h3>📝 回顾与规律：</h3>
+        <p><strong>暴跌原因：</strong>主要包括政策调整（如1996年社论、2007年上调印花税）、去杠杆（如2015年）、外部冲击（如2008年金融危机、2019年贸易摩擦、2020年疫情）以及市场自身泡沫破裂。</p>
+        <p><strong>事后影响：</strong>单日暴跌超过5%在A股历史上并不算非常频繁（尤其是剔除2008、2015等极端年份后），但其发生往往标志着阶段性顶部或底部的形成。统计显示，在暴跌之后，市场短期反弹的概率较高，且中长期（三个月、半年）来看，上涨的概率和平均收益都较为可观。但这并不意味着每次暴跌都是抄底机会，最终走势仍取决于当时的经济基本面和政策救市力度。</p>
+    </div>
+    """
+
+
     # --- 完整的 HTML 模板 ---
     html_template = f"""
 <!DOCTYPE html>
@@ -323,6 +410,8 @@ def create_html_content(stock_data_list):
     <style>
         body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; margin-top: 50px; background-color: #f4f4f9; }}
         h1 {{ color: #2c3e50; font-size: 2.5em; }}
+        h2 {{ color: #2c3e50; font-size: 1.8em; margin-top: 50px; border-bottom: 2px solid #3498db; padding-bottom: 10px; display: inline-block; }} 
+        h3 {{ color: #34495e; font-size: 1.4em; margin-top: 30px; }} 
         table {{ 
             width: 95%;
             margin: 30px auto; 
@@ -347,6 +436,19 @@ def create_html_content(stock_data_list):
         tr:nth-child(even) {{ background-color: #f2f2f2; }}
         .timestamp {{ color: #7f8c8d; margin-top: 30px; font-size: 1.2em; }}
         .note p {{ color: #34495e; margin: 5px 0; font-size: 1em;}}
+        .historical-section {{ /* 用于新内容的样式 */
+            width: 95%;
+            margin: 50px auto; 
+            padding: 20px;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.05);
+        }}
+        .historical-section p {{
+            text-align: left;
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }}
     </style>
 </head>
 <body>
@@ -362,7 +464,8 @@ def create_html_content(stock_data_list):
         <p>📌 **可转债均价计算说明**：均价已剔除价格大于或等于 {MAX_CB_PRICE:.2f} 的标的。</p>
         <p>注意：本页面每 {REFRESH_INTERVAL // 60} 分钟自动重新加载，以获取最新数据。</p>
     </div>
-</body>
+    
+    {historical_data_html} </body>
 </html>
 """
     return html_template
@@ -494,6 +597,7 @@ if __name__ == "__main__":
         print(f"成功更新文件: {OUTPUT_FILE}，包含 {len(all_stock_data)} 个证券/指数数据。")
     except Exception as e:
         print(f"写入文件失败: {e}")
+
 
 
 
