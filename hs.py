@@ -9,8 +9,8 @@ import calendar # 用于辅助判断周末/交易日
 
 # --- 全局配置 ---
 OUTPUT_FILE = "index_price.html"  # 最终生成的 HTML 报告文件名
-REFRESH_INTERVAL = 1800  # HTML 页面自动刷新间隔（秒），即 30 分钟
-MAX_CB_PRICE = 9999.00 # 可转债平均价计算时，剔除高于或等于此价格的标的
+REFRESH_INTERVAL = 300  # HTML 页面自动刷新间隔（秒），即 5 分钟
+MAX_CB_PRICE = 1000.00 # 可转债平均价计算时，剔除高于或等于此价格的标的
 
 # ======================= 通知配置区域 =======================
 NOTIFICATION_TOLERANCE = 0.0005  # 触发通知的目标比例（Target Ratio）容忍度（绝对值）
@@ -358,8 +358,8 @@ def create_html_content(stock_data_list):
 
     <div class="timestamp">数据更新时间: {timestamp_with_status}</div>
     <div class="note">
-        <p>📌 **代码运行时间说明**：本代码由 GitHub Actions 在**交易日**的**运行。</p>
-        <p>📌 **可转债均价计算说明**：均价计算已**剔除**价格大于或等于 {MAX_CB_PRICE:.2f} 的标的。（相当于暂停该功能）</p>
+        <p>📌 **代码运行时间说明**：本代码由 GitHub Actions 在交易时间运行。</p>
+        <p>📌 **可转债均价计算说明**：均价已剔除价格大于或等于 {MAX_CB_PRICE:.2f} 的标的。</p>
         <p>注意：本页面每 {REFRESH_INTERVAL // 60} 分钟自动重新加载，以获取最新数据。</p>
     </div>
 </body>
