@@ -445,12 +445,6 @@ if __name__ == "__main__":
     notification_log = load_notification_log() # 加载历史通知记录
     log_updated = False 
     
-    # =========================================================
-    # === 【临时测试代码】验证 notification_log.json 保存功能 ===
-    notification_log['TEST_PERSISTENCE'] = '2099-01-01' # 强制添加一个测试记录
-    log_updated = True                           # 强制设置更新标志为 True
-    # =========================================================
-    
     for item in all_stock_data:
         code = item.get('code')
         name = item.get('name')
@@ -500,6 +494,7 @@ if __name__ == "__main__":
         print(f"成功更新文件: {OUTPUT_FILE}，包含 {len(all_stock_data)} 个证券/指数数据。")
     except Exception as e:
         print(f"写入文件失败: {e}")
+
 
 
 
