@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="refresh" content="3600">
+    <title>Supabase 数据只读展示 (Munger)</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="quotes.js"></script>
+    
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background-color: #f4f7f6; }
+        h1 { color: #1e88e5; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; background-color: white; box-shadow: 0 4px 8px rgba(0 0 0 / 10%); }
+        th, td { border: 1px solid #e0e0e0; padding: 12px 15px; text-align: left; }
+        th { background-color: #1e88e5; color: white; font-weight: bold; text-transform: uppercase; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        
+        .loading { text-align: center; color: #555; padding: 20px; font-style: italic; }
+        .success { color: #4caf50; font-weight: bold; margin-top: 10px; }
+        .error { color: #e53935; font-weight: bold; margin-top: 10px; }
+        
+        /* 语录框样式 */
+        .quote-container { 
+            background-color: #fff9c4; 
+            border: 1px solid #e0e0e0; 
+            border-radius: 8px; 
+            padding: 20px; 
+            margin: 20px 0; 
+            box-shadow: 0 4px 8px rgba(0 0 0 / 10%); 
+            max-width: 800px; 
+            margin-left: auto; 
+            margin-right: auto; 
+        }
+        .quote-text { 
+            font-size: 18px; 
+            font-style: italic; 
+            color: #856404; 
+            margin-bottom: 10px; 
+            line-height: 1.6; 
+        }
+        .quote-author { 
+            font-size: 15px;
+            text-align: right; 
+            font-weight: bold; 
+            color: #b83838; 
+        }
+    </style>
+</head>
+<body>
+
+    <h1>📝 Munger 表格数据 (只读)</h1>
+    
+    <!-- 语录显示区域 -->
+    <div class="quote-container">
+        <div id="quote-text" class="quote-text">正在加载语录...</div>
+        <div id="quote-author" class="quote-author"></div>
+    </div>
+
+    <div id="data-container">
+        <p class="loading">正在连接 Supabase 并加载数据...</p>
+    </div>
+    
+    <p id="message-status"></p>
+
+    <script>
+        // =======================================================================
+        // 【配置信息】
+        // =======================================================================
+        const SUPABASE_URL = 'https://qburustwmcjpnilofjsi.supabase.co'; 
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFidXJ1c3R3bWNqcG5pbG9manNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM4MTI4MjUsImV4cCI6MjA3OTM4ODgyNX0.mzJN1k0ogNnr9kpqtandH_OH9nHIIeNrde1uac4JEdc'; 
+        const TABLE_NAME = 'Munger'; 
+        
+        // 【显示顺序配置】 - 新增，定义精确的列顺序
+        const DISPLAY_ORDER = [
+            'name', 
+            'code', 
+            'target_price', 
+            'current_price', 
+            'ratio', 
+            'note', 
+            'updated_at'
+        ];
+        
+        // 【排序配置】
+        const SORT_FIELD = 'ratio'; // 默认排序字段
+        const SORT_DIRECTION = 'asc'; // 默认排序方向：'asc'（升序）或 'desc'（降序）
+        // =======================================================================
+        
+        const client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        
+        const dataContainer = document.getElementById('data-container');
+        const statusMessage = document.getElementById('message-status');
+        const quoteTextElement = document.getElementById('quote-text');
+        const quoteAuthorElement = document.getElementById('quote-author');
+        
+        // 从quotesData中随机读取并显示语录的函数
+        function loadRandomQuote() {
+            try {
+                // 检查quotesData是否存在且是数组
+                if (!window.quotesData || !Array.isArray(window.quotesData) || window.quotesData.length === 0) {
+                    quoteTextElement.textContent = '无法加载语录数据';
+                    quoteAuthorElement.textContent = '';
+                    console.warn('quotesData不可用或为空');
+                    return;
+                }
+                
+                // 随机选择一条语录
+                const randomIndex = Math.floor(Math.random() * window.quotesData.length);
+                const selectedQuote = window.quotesData[randomIndex];
+                
+                // 更新DOM元素
+                if (selectedQuote && selectedQuote.quote) {
+                    quoteTextElement.textContent = selectedQuote.quote;
+                    quoteAuthorElement.textContent = selectedQuote.author ? `- ${selectedQuote.author}` : '';
+                } else {
+                    quoteTextElement.textContent = '语录格式不正确';
+                    quoteAuthorElement.textContent = '';
+                }
+            } catch (error) {
+                console.error('加载语录时出错:', error);
+                quoteTextElement.textContent = '加载语录时出错';
+                quoteAuthorElement.textContent = '';
+            }
+        }
+
+        // 状态消息显示函数
+        function showStatus(message, isError = false) {
+            statusMessage.textContent = message;
+            statusMessage.className = isError ? 'error' : 'success';
+            setTimeout(() => {
+                statusMessage.textContent = '';
+                statusMessage.className = '';
+            }, 3000);
+        }
+
+        // --- 数据格式化辅助函数 ---
+        function formatDateTime(isoString) {
+            if (!isoString) return '-';
+            try { 
+                const [date, time] = isoString.split('T');
+                const timePart = time ? time.substring(0, 8) : '';
+                return timePart ? `${date} ${timePart}` : date;
+            } catch (e) { return isoString; }
+        }
+        function formatPrice(value) {
+            if (value === null || isNaN(value)) return '-';
+            return parseFloat(value).toFixed(2);
+        }
+        function formatRatio(value) {
+            if (value === null || isNaN(value)) return '-';
+            return (parseFloat(value) * 100).toFixed(2) + '%';
+        }
+
+        // -----------------------------------------------------------------------
+        // 函数一：从 Supabase 读取数据并渲染表格
+        // -----------------------------------------------------------------------
+        async function fetchAndDisplayData() {
+            dataContainer.innerHTML = '<p class="loading">正在从 Supabase 读取数据...</p>';
+            
+            try {
+                // 1. 从数据库获取所有数据
+                let { data: rows, error } = await client
+                    .from(TABLE_NAME)
+                    .select('*')
+                    .order(SORT_FIELD, { ascending: SORT_DIRECTION === 'asc' }); 
+
+                if (error) {
+                    console.error('Supabase 错误:', error);
+                    dataContainer.innerHTML = `<p class="error">数据加载失败！错误信息：${error.message}</p>`;
+                    showStatus('读取数据失败', true);
+                    return;
+                }
+
+                if (!rows || rows.length === 0) {
+                     dataContainer.innerHTML = '<p class="loading">数据库中没有找到数据。</p>';
+                     return;
+                }
+
+                // 2. 动态构建 HTML 表格
+                let htmlContent = '<table><thead><tr>';
+                
+                // 1. 构建表头 (使用 DISPLAY_ORDER)
+                htmlContent += DISPLAY_ORDER.map(field => `<th>${field.toUpperCase().replace('_', ' ')}</th>`).join('');
+                htmlContent += '</tr></thead><tbody>';
+                
+                // 2. 构建数据行
+                htmlContent += rows.map(row => {
+                    // 遍历 DISPLAY_ORDER
+                    const rowCells = DISPLAY_ORDER.map(field => {
+                        const fieldName = field.toLowerCase();
+                        const rawValue = row[field];
+                        let displayValue = rawValue === null ? '-' : rawValue;
+                        
+                        // 应用格式化规则
+                        if (fieldName === 'updated_at') {
+                            displayValue = formatDateTime(rawValue);
+                        } else if (fieldName === 'target_price' || fieldName === 'current_price') {
+                            displayValue = formatPrice(rawValue);
+                        } else if (fieldName === 'ratio') {
+                            displayValue = formatRatio(rawValue);
+                        }
+                        
+                        return `<td>${displayValue}</td>`;
+                    }).join('');
+                    return `<tr>${rowCells}</tr>`;
+                }).join('');
+                
+                htmlContent += '</tbody></table>';
+                dataContainer.innerHTML = htmlContent;
+                showStatus('数据加载成功');
+                
+            } catch (e) {
+                console.error('JS 运行时错误:', e);
+                dataContainer.innerHTML = `<p class="error">页面初始化失败！请检查控制台错误。</p>`;
+            }
+        }
+
+        // 页面加载完成后调用主函数和语录加载函数
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchAndDisplayData(); 
+            loadRandomQuote(); // 加载随机语录
+        });
+
+    </script>
+</body>
+</html>
